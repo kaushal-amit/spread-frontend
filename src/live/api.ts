@@ -32,7 +32,12 @@ const json = async (r: Response) => {
   if (!r.ok) {
     const plain = body ? (body.detail || body.error || body.message) : null;
     const snippet = !body && text ? text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) : null;
-    throw new Error(`${r.status} ${r.statusText || ""}`.trim() + (plain ? ` — ${plain}` : snippet ? ` — ${snippet}` : ""));
+    // SPR-20 · when the server gives a readable sentence, show ONLY that — the
+    // "409 Conflict — " prefix is noise to the trader ("One symbol, one slot…"
+    // stands on its own). Fall back to the status line only when there is no
+    // server message to show.
+    if (plain) throw new Error(String(plain));
+    throw new Error(`${r.status} ${r.statusText || ""}`.trim() + (snippet ? ` — ${snippet}` : ""));
   }
   return body;
 };

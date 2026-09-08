@@ -183,7 +183,8 @@ export default function App() {
         onPick={pickTab} onClose={() => setTab("TODAY")} onPopGo={handlePopGo}
       />
 
-      <SymbolSearch show={showSearch} all={board.data?.all || []} onPick={openSymbol} />
+      <SymbolSearch show={showSearch} all={board.data?.all || []}
+        onPick={(s) => { openSymbol(s); setShowSearch(false); }} onClose={() => setShowSearch(false)} />
 
       <div className={`main split-layout layout-${viewMode} ${isFullscreen ? "is-fullscreen" : ""}`} id="main" ref={mainScrollRef}>
         {(viewMode === "split" || viewMode === "chat") && (

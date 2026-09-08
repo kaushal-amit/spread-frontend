@@ -4,15 +4,18 @@
  * Every row is a StockCandidate the server screened today. There is no slot
  * cap here: watching is free; the depth SWEEP has slots and lives in BOOKS.
  */
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import type { StockCandidate } from "../api/types";
 import { fmt, kd } from "../utils/format";
 
-interface Props { show: boolean; all: StockCandidate[]; onPick: (symbol: string) => void }
+interface Props { show: boolean; all: StockCandidate[]; onPick: (symbol: string) => void; onClose: () => void }
 
-export const SymbolSearch: React.FC<Props> = ({ show, all, onPick }) => {
+export const SymbolSearch: React.FC<Props> = ({ show, all, onPick, onClose }) => {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "recommended" | "near_miss" | "rejected">("all");
+  // SPR-18 · clear the typed symbol whenever the panel closes, so it never
+  // re-opens showing a stale query.
+  useEffect(() => { if (!show) setQ(""); }, [show]);
   const rows = useMemo(() => {
     const t = q.trim().toUpperCase();
     return all
@@ -24,7 +27,8 @@ export const SymbolSearch: React.FC<Props> = ({ show, all, onPick }) => {
   return (
     <div className="addpanel show" id="add-panel">
       <div className="addhead">
-        <input autoFocus placeholder="symbol…" value={q} onChange={(e) => setQ(e.target.value)} id="add-search" />
+        <input autoFocus placeholder="symbol…" value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") { setQ(""); onClose(); } }} id="add-search" />
         {(["all", "recommended", "near_miss", "rejected"] as const).map((f) => (
           <button key={f} className={`btn ${filter === f ? "go" : "skip"}`} onClick={() => setFilter(f)}>{f.replace("_", " ")}</button>
         ))}

@@ -108,9 +108,13 @@ export const BookTile: React.FC<Props> = React.memo(function BookTile({ slot, bo
 
       {!book || (!bids.length && !offers.length) ? (
         <div className="book-empty">
-          no book captured yet
+          {/* SPR-09 · the book arrives on the socket push AFTER the slot is
+              watched, so a tile is briefly empty on open while a book exists
+              server-side. Do not assert "no book captured yet" in that window —
+              say what is actually true: waiting for this cycle, or reconnecting. */}
+          {connected ? "waiting for this cycle's capture…" : "book not live — reconnecting…"}
           <div className="book-dim">
-            8 of 142 symbols hold a depth slot; the sweep runs every 25s
+            the depth sweep runs about every {captureIntervalSecs ?? 25}s
           </div>
         </div>
       ) : (
