@@ -1,0 +1,35 @@
+{
+  "_captured": {
+    "url": "/api/sizing/SZTESTABAR",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.465Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "symbol": "SZTESTABAR",
+    "price_fils": 248,
+    "floor_kd": 1488,
+    "ceiling_kd": 413.333,
+    "suggested_kd": null,
+    "suggested_shares": null,
+    "your_pct": null,
+    "net_per_fil_kd": null,
+    "reachable": false,
+    "reasons": [],
+    "basis": {
+      "free_kd": 1256,
+      "committed_kd": 744,
+      "budget_kd": 2000,
+      "bid_qty": 120000,
+      "touch_bid_qty": 120000,
+      "aged_bid_qty": 120000,
+      "aged_from_fils": 248,
+      "aged_age_mins": 40,
+      "bid_note": null,
+      "bid_basis": "aged_bid",
+      "offer_qty": 5000,
+      "sized_from": "free_kd"
+    }
+  }
+}

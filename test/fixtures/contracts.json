@@ -1,0 +1,45 @@
+{
+  "_captured": {
+    "url": "/api/trading/contracts?date=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.432Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": [
+    {
+      "symbol": "SZTESTABAR",
+      "seq": 1,
+      "state": "holding",
+      "shares": 3000,
+      "entry": 248,
+      "bid": 248,
+      "offer": 251,
+      "committedKd": 744,
+      "unrealisedKd": 0,
+      "breakEvenPrice": 250,
+      "targetNormal": 250,
+      "targetTrending": 254,
+      "peakSinceFill": 248,
+      "stepDownTime": "11:00",
+      "boughtShares": 3000,
+      "openedOn": "2001-01-08",
+      "markedAt": "quote",
+      "quoteAt": "2001-01-08T09:00:00.000Z",
+      "legs": [
+        {
+          "id": 341,
+          "contractId": 1,
+          "symbol": "SZTESTABAR",
+          "time": "2001-01-08T09:00:00.000Z",
+          "side": "BUY",
+          "status": "FILLED",
+          "price": 248,
+          "shares": 3000,
+          "commission_kd": 1.6,
+          "note": ""
+        }
+      ]
+    }
+  ]
+}

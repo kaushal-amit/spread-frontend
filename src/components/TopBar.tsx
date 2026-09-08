@@ -1,0 +1,210 @@
+/**
+ * TopBar — the account strip, from /api/account, /api/budget, /api/session
+ * and /api/market. Nothing computed here except formatting.
+ *
+ * The BUDGET field edits the slot the backend screens with (PUT /gates
+ * {"session-budget": kd}) — one budget, persisted, the same number the board
+ * uses. It used to edit a local variable that was cash + P&L, so every save
+ * drifted by the day's P&L.
+ */
+import React, { useState, useEffect } from "react";
+import { ViewMode } from "../types";
+import { Maximize2, Minimize2, Columns2, BarChart2, MessageSquare, Edit2, Check } from "lucide-react";
+import { fmt } from "../utils/format";
+import { kuwaitHHMM } from "../lib/time";
+import type { AccountState, Budget, SessionInfo, MarketDay, TradingContract } from "../api/types";
+import type { Live } from "../api/hooks";
+import { apiPost } from "../api/client";
+
+/**
+ * 4.2 · every tile takes the hook's LIVE state, not only its data, so it can
+ * say "loading" or "unavailable" instead of a dash that reads like a quiet
+ * number. A tile never renders 0 for a value it does not have.
+ */
+interface TopBarProps {
+  account: Live<AccountState>;
+  budget: Live<Budget>;
+  session: Live<SessionInfo>;
+  market: Live<MarketDay>;
+  contracts: Live<TradingContract[]>;
+  errors: string[];
+  connected: boolean;
+  onBudgetSaved: () => void;
+  /** The server's session day; null until /api/session has answered. */
+  selectedDate: string | null;
+  onDateChange: (date: string) => void;
+  onToggleAdd: () => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+}
+
+/** "loading" while the first fetch is in flight, "unavailable" after a failure, else the value. */
+type TileState = "loading" | "unavailable" | "ok" | "stale";
+/** "stale" = the last refresh FAILED and the value on screen is the previous one. */
+const state = <T,>(h: Live<T>): TileState => (h.data ? (h.error ? "stale" : "ok") : h.loading ? "loading" : h.error ? "unavailable" : "loading");
+const placeholder = (st: TileState) => (st === "loading" ? "…" : "n/a");
+const staleCls = (st: TileState) => (st === "stale" ? "stale" : "");
+const staleTitle = <T,>(h: Live<T>) => (h.error && h.data ? `STALE — last refresh failed (${(h.error as any).code || "error"}); value from ${kuwaitHHMM(h.at)} Kuwait` : null);
+
+export const TopBar: React.FC<TopBarProps> = ({
+  account: accountLive, budget: budgetLive, session: sessionLive, market: marketLive, contracts: contractsLive,
+  errors, connected, onBudgetSaved, selectedDate, onDateChange, onToggleAdd,
+  viewMode = "split", onViewModeChange, isFullscreen = false, onToggleFullscreen,
+}) => {
+  const account = accountLive.data, budget = budgetLive.data, session = sessionLive.data,
+    market = marketLive.data, contracts = contractsLive.data;
+  const aSt = state(accountLive), bSt = state(budgetLive), cSt = state(contractsLive), mSt = state(marketLive), sSt = state(sessionLive);
+  const slot = budget?.budget_kd ?? null;
+  const [isEditing, setIsEditing] = useState(false);
+  const [budgetString, setBudgetString] = useState(slot == null ? "" : String(slot));
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => { if (!isEditing && slot != null) setBudgetString(String(slot)); }, [slot, isEditing]);
+
+  const submit = async () => {
+    const val = parseFloat(budgetString);
+    setIsEditing(false);
+    if (Number.isNaN(val) || val < 100 || val === slot) { setBudgetString(slot == null ? "" : String(slot)); return; }
+    try {
+      await apiPost("/gates", { changes: { "session-budget": val }, changedBy: "topbar" }, "PUT");
+      setSaveError(null);
+      onBudgetSaved();
+    } catch (e: any) {
+      setSaveError(e?.message || "save failed");
+      setBudgetString(slot == null ? "" : String(slot));
+    }
+  };
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") submit();
+    else if (e.key === "Escape") { setBudgetString(slot == null ? "" : String(slot)); setIsEditing(false); }
+  };
+
+  const open = (contracts || []).filter((c) => c.state !== "picked");
+  const posDisplay = open.length === 0 ? "FLAT" : open.length === 1
+    ? `LONG ${fmt(open[0].shares)} ${open[0].symbol}` : `${open.length} OPEN`;
+  const posTooltip = open.length
+    ? open.map((p) => `${p.symbol}: ${fmt(p.shares)} sh @ ${p.entry ?? "—"} (${fmt(Math.round(p.committedKd))} KD) [${p.state}]${p.markedAt === "entry" ? " — no quote today" : ""}`).join("\n")
+    : contracts ? "No open positions" : placeholder(cSt);
+
+  const pnl = account?.todayKd ?? null;
+  const pnlPct = account && account.netDepositedKd ? (account.todayKd / account.netDepositedKd) * 100 : null;
+  const free = budget?.free_kd ?? null;
+  // R-04 · min_position_kd comes from the server (it changes on 1 October); no
+  // hardcoded 333 fallback that would survive the change silently. With the
+  // budget not yet loaded there is nothing to warn against.
+  const minPos = budget?.min_position_kd ?? null;
+  const freeClass = free == null ? "" : free <= 0 ? "dn" : (minPos != null && free < minPos) ? "warn" : "";
+  const freeFraction = budget && budget.budget_kd > 0 ? Math.max(0, Math.min(1, budget.free_kd / budget.budget_kd)) : 0;
+  const blocks = Math.round(freeFraction * 6);
+  const blockBar = "█".repeat(blocks) + "░".repeat(Math.max(0, 6 - blocks));
+
+  // R-05 · the colour comes from the server's band, not a 35/50 rule re-derived here.
+  const breadthClass = market?.breadthBand === "risk_on" ? "up" : market?.breadthBand === "risk_off" ? "dn" : "";
+
+  // Session mode from the SERVER's clock, never the browser's.
+  const today = session?.kuwaitDay ?? null;
+  let modeText = sSt === "loading" ? "…" : "NO SESSION", modeClass = "past";
+  if (today && selectedDate && selectedDate < today) { modeText = "REVIEW"; modeClass = "past"; }
+  else if (today && selectedDate && selectedDate > today) { modeText = "PLANNING"; modeClass = "plan"; }
+  else if (session) {
+    modeText = session.phase === "pre_open" ? "PRE-OPEN" : session.phase === "closed" ? "CLOSED"
+      : session.phase === "step_down" ? "STEP-DOWN" : session.phase === "peak" ? "PEAK" : "LIVE";
+    modeClass = session.open ? "live" : session.phase === "pre_open" ? "plan" : "past";
+  }
+
+  return (
+    <div className="bar">
+      <button className="addbtn" id="add-stock-btn" onClick={onToggleAdd}>+ ADD</button>
+
+      <span className={`fld budget-fld ${isEditing ? "editing" : ""} ${staleCls(bSt)}`} id="budget-fld"
+        onClick={() => { if (!isEditing && slot != null) setIsEditing(true); }}
+        title={saveError ? `Save failed: ${saveError}` : "The slot the board screens with. Click to edit — saved to the gate store."}>
+        <span className="k">SLOT</span>
+        {isEditing ? (
+          <span className="budget-edit-box">
+            <input type="number" id="budget-input" autoFocus value={budgetString}
+              onChange={(e) => setBudgetString(e.target.value)} onKeyDown={onKey} onBlur={submit} step="10" min="100" />
+            <button type="button" className="budget-save-btn" onClick={(e) => { e.stopPropagation(); submit(); }} title="Save"><Check size={11} /></button>
+          </span>
+        ) : (
+          <span className={`v budget-val-display ${saveError ? "dn" : ""}`} id="cash">
+            {slot == null ? placeholder(bSt) : slot.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+            <Edit2 size={10} className="budget-edit-icon" />
+          </span>
+        )}
+      </span>
+
+      <span className={`fld ${staleCls(aSt)}`} id="equity-fld" title={staleTitle(accountLive) ?? (account ? `cash ${account.buyingPowerKd.toFixed(2)} · invested ${account.investedKd.toFixed(2)} · unrealised ${account.unrealisedKd.toFixed(2)}` : "")}>
+        <span className="k">EQUITY</span>
+        <span className="v" id="equity">{account ? account.equityKd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : placeholder(aSt)}</span>
+      </span>
+
+      <span className={`fld ${staleCls(aSt)}`} id="gain-loss-fld" title={staleTitle(accountLive) ?? (account ? `${account.todayTrips} round trip${account.todayTrips === 1 ? "" : "s"} today · since 28 Jul ${account.since28JulKd.toFixed(2)}` : "")}>
+        <span className="k">TODAY</span>
+        <span className={`v ${pnl == null ? "" : pnl > 0 ? "up" : pnl < 0 ? "dn" : ""}`} id="dayp">
+          {pnl == null ? placeholder(aSt) : `${pnl > 0 ? "+" : ""}${pnl.toFixed(2)}`}
+          {pnlPct != null && <small>{pnlPct > 0 ? "+" : ""}{pnlPct.toFixed(2)}%</small>}
+        </span>
+      </span>
+
+      <span className={`fld ${staleCls(cSt)}`} id="position-fld" title={staleTitle(contractsLive) ?? posTooltip} style={{ cursor: open.length ? "help" : "default" }}>
+        <span className="k">POSITION</span>
+        <span className="v" id="posn" style={{ fontSize: "12px", letterSpacing: ".06em" }}>{contracts ? posDisplay : placeholder(cSt)}</span>
+      </span>
+
+      <span className={`fld free-fld ${freeClass} ${staleCls(bSt)}`} id="free-fld"
+        title={budget ? `Free: ${fmt(Math.round(budget.free_kd))} KD | Committed: ${fmt(Math.round(budget.committed_kd))} KD | Reserve: ${fmt(Math.round(budget.reserve_kd))}` : ""}>
+        <span className="k">FREE</span>
+        <span className={`v ${freeClass}`} id="free-val">{free == null ? placeholder(bSt) : <>{fmt(Math.round(free))} <span className="block-bar">{blockBar}</span></>}</span>
+      </span>
+
+      <span className={`fld reserve-fld ${staleCls(bSt)}`} id="reserve-fld" title="Held back until 11:00 Kuwait — reserve_pct and reserve_release_hhmm in kb_threshold.">
+        <span className="k">RESERVE</span>
+        <span className="v" id="reserve-val">
+          {budget ? fmt(Math.round(budget.reserve_kd)) : placeholder(bSt)}
+          <small className="reserve-sub"> · {budget ? (budget.reserve_held ? `until ${String(budget.reserve_releases_at_hhmm).replace(/(\d\d)(\d\d)/, "$1:$2")}` : "released") : ""}</small>
+        </span>
+      </span>
+
+      <span className={`fld ${staleCls(mSt)}`} id="mkt" style={{ marginLeft: "auto" }} title={market?.available ? `${market.regime || ""} · 5d avg ${market.breadth5dAvgPct}%${market.isToday ? "" : " · prior session"}` : market ? "no market_day row for this session" : `market: ${mSt}`}>
+        <span className="k">BREADTH</span>
+        <span className={`v ${breadthClass}`} id="brv">
+          {market?.available ? `${market.breadthPct.toFixed(0)}%` : market ? "no row" : placeholder(mSt)}
+          {market?.available && <small>{market.up}▲ {market.down}▼</small>}
+        </span>
+      </span>
+
+      {/* 4.6 · the API chip: any failing fetch, or a socket that cannot connect. */}
+      {(errors.length > 0 || !connected) && (
+        <span className="fld" id="api-errors" title={[...errors, connected ? null : "socket: not connected — the board is not live"].filter(Boolean).join("\n")}>
+          <span className="k">API</span>
+          <span className="v dn">{errors.length ? `${errors.length} failing` : "not live"}{errors.length && !connected ? " · not live" : ""}</span>
+        </span>
+      )}
+
+      <span className="dpick" id="date-picker-wrap">
+        <input type="date" id="dsel" value={selectedDate ?? ""} disabled={selectedDate == null} onChange={(e) => onDateChange(e.target.value)} aria-label="Session date"
+          title={selectedDate == null ? "waiting for /api/session — the session day is the server's" : "the server's session day (rolls 04:00 Kuwait)"} />
+        <span className={`mode ${modeClass}`} id="dmode" title={session?.note || ""}>{modeText}{session?.timeStr ? ` ${session.timeStr}` : ""}</span>
+      </span>
+
+      {onViewModeChange && (
+        <div className="view-mode-group" id="view-mode-group" role="group" aria-label="Layout view mode">
+          <button type="button" className={`view-btn ${viewMode === "split" ? "active" : ""}`} onClick={() => onViewModeChange("split")} title="Split view" aria-label="Split view" id="view-mode-split"><Columns2 size={13} /></button>
+          <button type="button" className={`view-btn ${viewMode === "analytics" ? "active" : ""}`} onClick={() => onViewModeChange("analytics")} title="Full Analytics view" aria-label="Full Analytics view" id="view-mode-analytics"><BarChart2 size={13} /></button>
+          <button type="button" className={`view-btn ${viewMode === "chat" ? "active" : ""}`} onClick={() => onViewModeChange("chat")} title="Full Chat view" aria-label="Full Chat view" id="view-mode-chat"><MessageSquare size={13} /></button>
+        </div>
+      )}
+
+      {onToggleFullscreen && (
+        <button type="button" className={`fullscreen-btn ${isFullscreen ? "active" : ""}`} onClick={onToggleFullscreen}
+          title={isFullscreen ? "Exit Fullscreen (Esc)" : "Enter Fullscreen"} aria-label={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"} id="fullscreen-toggle-btn">
+          {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+      )}
+    </div>
+  );
+};

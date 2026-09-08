@@ -1,0 +1,17 @@
+# 4.5 · lint, test, typecheck, build — the Step 4 gate, on every push and PR.
+name: frontend
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      # Ground rule 4: no fee math, gate logic or state maps in the browser.
+      - run: '! grep -rn "3\.4\|INITIAL_" src'

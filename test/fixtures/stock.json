@@ -1,0 +1,167 @@
+{
+  "_captured": {
+    "url": "/api/stocks/SZTESTABAR?date=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.378Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "symbol": "SZTESTABAR",
+    "price": 248,
+    "bid": 248,
+    "offer": 251,
+    "spread": 3,
+    "entryPlacement": "INSIDE",
+    "shares": 8000,
+    "notionalKd": 1992,
+    "roundTripKd": 6.96,
+    "netKd": 1.04,
+    "netPerFilKd": 8,
+    "trendWarn": true,
+    "changeFils": -24,
+    "changePct": -8.82,
+    "rising": false,
+    "status": "recommended",
+    "verdict": "TRADABLE",
+    "failingGatesCount": 0,
+    "failingGateNames": [],
+    "gateGroups": [
+      {
+        "groupName": "Can I trade it",
+        "cells": [
+          {
+            "label": "Price band",
+            "ok": true,
+            "warn": false,
+            "value": "248 fils",
+            "sub": ""
+          },
+          {
+            "label": "Profit floor",
+            "ok": true,
+            "warn": false,
+            "value": "+1.04",
+            "sub": "1 tick target"
+          },
+          {
+            "label": "Postable",
+            "ok": true,
+            "warn": false,
+            "value": "62%",
+            "sub": ""
+          },
+          {
+            "label": "Exit depth",
+            "ok": true,
+            "warn": false,
+            "value": "73%",
+            "sub": "18% for your size"
+          }
+        ]
+      },
+      {
+        "groupName": "Is it really trading",
+        "cells": [
+          {
+            "label": "Trade size",
+            "ok": true,
+            "warn": false,
+            "value": "11,374",
+            "sub": ""
+          },
+          {
+            "label": "Distribution",
+            "ok": true,
+            "warn": false,
+            "value": "0.8× vol",
+            "sub": "flow 1.84"
+          },
+          {
+            "label": "Consistency",
+            "ok": true,
+            "warn": false,
+            "value": "5/5",
+            "sub": ""
+          }
+        ]
+      },
+      {
+        "groupName": "Does it move",
+        "cells": [
+          {
+            "label": "Movement",
+            "ok": true,
+            "warn": false,
+            "value": "115",
+            "sub": "13 of 2+ fils"
+          },
+          {
+            "label": "Tape quality",
+            "ok": true,
+            "warn": false,
+            "value": "18%",
+            "sub": "up-only 31%"
+          }
+        ]
+      },
+      {
+        "groupName": "Risk and timing",
+        "cells": [
+          {
+            "label": "Direction",
+            "ok": true,
+            "warn": true,
+            "value": "-24 / +27",
+            "sub": "1d / 5d"
+          }
+        ]
+      }
+    ],
+    "takeItBecause": "115 price moves · average trade 11,374 shares, no tape painting · a gap to post inside at queue zero · only 18% of moves from trades under 100 shares",
+    "careful": "down 27 fils over 5 sessions — a warning only, since a stock that fell yesterday is 44% to rise today",
+    "headroom": {
+      "minKd": 0,
+      "maxKd": 0,
+      "profitPerFil": 8,
+      "currentKd": 2000,
+      "headroomX": 0
+    },
+    "market": "Main Market",
+    "marketVerified": false,
+    "isDead": false,
+    "isOutOfReach": false,
+    "isStructuralFailure": false,
+    "behaviourFlags": [
+      {
+        "flag": "FALLING",
+        "icon": "▼",
+        "label": "Falling",
+        "why": "-24 fils yesterday"
+      }
+    ],
+    "metrics": {
+      "priceFils": 248,
+      "netKd": 1.04,
+      "netPerFilKd": 8,
+      "tradeSizeShares": 0,
+      "movesPerDay": 0,
+      "moves2PlusPerDay": 0,
+      "tapeQualityPct": 0,
+      "tapeQualityUpPct": null,
+      "walkedUp": false,
+      "postablePct": 0,
+      "exitDepthPct": 0,
+      "volSpikeRatio": 0,
+      "outwardBlockFlowRatio": 0,
+      "consistencyDays": 0,
+      "gapPresentPct": 0,
+      "dailyRangeFils": 0,
+      "targetTicks": 1
+    },
+    "dataQuality": "OK",
+    "dataQualityPct": 100,
+    "notComputed": [],
+    "gateStatsSource": "BACKEND_BRIDGE"
+  }
+}

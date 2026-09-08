@@ -1,0 +1,22 @@
+{
+  "_captured": {
+    "url": "/api/account?date=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.349Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "buyingPowerKd": 6000,
+    "investedKd": 744,
+    "claimedKd": 0,
+    "equityKd": 6744,
+    "unrealisedKd": 0,
+    "todayKd": 0,
+    "todayTrips": 0,
+    "since28JulKd": 0,
+    "since28JulFills": 0,
+    "netDepositedKd": 6000,
+    "returnPct": 12.4
+  }
+}

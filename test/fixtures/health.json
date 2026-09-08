@@ -1,0 +1,23 @@
+{
+  "_captured": {
+    "url": "/api/health",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.286Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "status": "ok",
+    "time": "2026-09-04T16:07:16.275Z",
+    "quoteAgeSec": 809593636,
+    "latestQuoteAt": "2001-01-08T09:00:00.000Z",
+    "latestStatsDay": "2001-01-08",
+    "statsSource": "BACKEND_BRIDGE",
+    "session": {
+      "open": false,
+      "phase": "closed"
+    },
+    "staleAfterSec": 300,
+    "note": null
+  }
+}

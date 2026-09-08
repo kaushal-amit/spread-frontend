@@ -1,0 +1,35 @@
+{
+  "_captured": {
+    "url": "/api/ledger?from=2001-01-08&to=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.447Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": [
+    {
+      "id": 198,
+      "at": "2026-09-04T15:45:35.338Z",
+      "kind": "DEPOSIT",
+      "amount_kd": 2000,
+      "balance_kd": 2000,
+      "note": "fixture deposit"
+    },
+    {
+      "id": 223,
+      "at": "2026-09-04T15:54:52.516Z",
+      "kind": "DEPOSIT",
+      "amount_kd": 2000,
+      "balance_kd": 4000,
+      "note": "fixture deposit"
+    },
+    {
+      "id": 242,
+      "at": "2026-09-04T16:06:10.289Z",
+      "kind": "DEPOSIT",
+      "amount_kd": 2000,
+      "balance_kd": 6000,
+      "note": "fixture deposit"
+    }
+  ]
+}

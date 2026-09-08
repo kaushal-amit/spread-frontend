@@ -1,0 +1,24 @@
+{
+  "_captured": {
+    "url": "/api/candles/SZTESTABAR?date=2001-01-08&minutes=5",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.455Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "symbol": "SZTESTABAR",
+    "intervalMinutes": 5,
+    "grain": "intraday",
+    "candles": [
+      {
+        "time": "2001-01-08T09:00:00.000Z",
+        "open": 248,
+        "high": 248,
+        "low": 248,
+        "close": 248,
+        "volume": 0
+      }
+    ]
+  }
+}

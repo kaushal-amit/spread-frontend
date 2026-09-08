@@ -1,0 +1,28 @@
+{
+  "_captured": {
+    "url": "/api/market?date=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.308Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "tradingDay": "2001-01-08",
+    "symbolsTraded": 1,
+    "up": 1,
+    "down": 0,
+    "flat": 0,
+    "breadthPct": 100,
+    "breadth5dAvgPct": 0,
+    "regime": "NEUTRAL",
+    "breadthBand": "neutral",
+    "volumeShares": 3600,
+    "trades": 12,
+    "turnoverKd": 0,
+    "volumeVs20d": 0,
+    "indexYtdPct": null,
+    "computedAt": "2026-09-04T16:06:10.287Z",
+    "isToday": true,
+    "available": true
+  }
+}

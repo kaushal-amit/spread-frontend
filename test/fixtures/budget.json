@@ -1,0 +1,21 @@
+{
+  "_captured": {
+    "url": "/api/budget",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.323Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "budget_kd": 2000,
+    "reserve_kd": 0,
+    "reserve_held": false,
+    "reserve_releases_at_hhmm": 1100,
+    "committed_kd": 744,
+    "open_positions": 1,
+    "free_kd": 1256,
+    "min_position_kd": 333,
+    "max_price_fils": 333,
+    "note": "free_kd is what a NEW position may use. Sizing NEVER divides the total: with one position open that is wrong on every other symbol."
+  }
+}

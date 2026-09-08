@@ -1,0 +1,53 @@
+{
+  "_captured": {
+    "url": "/api/orders?from=2001-01-08&to=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.443Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "contracts": [
+      {
+        "key": "SZTESTABAR:2001-01-08:1",
+        "symbol": "SZTESTABAR",
+        "contractDay": "2001-01-08",
+        "seq": 1,
+        "state": "open",
+        "grossKd": -744,
+        "commissionKd": 1.6,
+        "netKd": null,
+        "fills": 1,
+        "executions": 1,
+        "heldMinutes": null,
+        "flags": [],
+        "legs": [
+          {
+            "id": 341,
+            "symbol": "SZTESTABAR",
+            "side": "BUY",
+            "status": "FILLED",
+            "price": 248,
+            "shares": 3000,
+            "filledShares": 3000,
+            "commission_kd": 1.6,
+            "executions": null,
+            "placement": null,
+            "brokerOrderId": null,
+            "time": "2001-01-08T09:00:00.000Z",
+            "resolvedAt": "2001-01-08T09:01:00.000Z",
+            "note": ""
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "ordersPlaced": 1,
+      "fills": 1,
+      "fillRatePct": 100,
+      "exitsAsPosted": 0,
+      "exitsMovedDown": 0,
+      "contractsClosed": 0
+    }
+  }
+}

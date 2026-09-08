@@ -1,0 +1,75 @@
+{
+  "_captured": {
+    "url": "/api/session",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.301Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "phase": "closed",
+    "hour": 19,
+    "timeStr": "19:07",
+    "driftVsOpen": 0,
+    "minutesToStepDown": 0,
+    "lateToOpen": false,
+    "note": "weekend",
+    "open": false,
+    "kuwaitDay": "2026-09-04",
+    "reserveReleased": true,
+    "driftByHour": [],
+    "driftMeasured": false,
+    "stops": {
+      "day": "2026-09-04",
+      "now": "2026-09-04T16:07:16.294Z",
+      "clock": "19:07",
+      "market": {
+        "verdict": "trade",
+        "reason": "breadth 60% above 50",
+        "breadthPct": 60,
+        "at": "2026-09-04T15:54:52.589Z",
+        "clock": "18:54",
+        "hourAgo": {
+          "breadthPct": 60,
+          "at": "2026-09-04T15:47:52.589Z",
+          "clock": "18:47"
+        },
+        "dropPts": 0,
+        "rising": false,
+        "readings": {
+          "1000": null,
+          "0900": null,
+          "0930": null
+        },
+        "captures": 8
+      },
+      "losses": {
+        "count": 0,
+        "contractsClosed": 0,
+        "losses": [],
+        "lastLossAt": null,
+        "cooloffUntil": null,
+        "inCooloff": false,
+        "stopped": false,
+        "reasons": []
+      },
+      "flatBy": "12:45",
+      "pastFlatBy": false,
+      "mode": "trade",
+      "canOpen": true,
+      "maxTargetTicks": null,
+      "reasons": [],
+      "warnings": [],
+      "thresholds": {
+        "breadth_stop_pct": 35,
+        "breadth_careful_pct": 50,
+        "breadth_drop_stop_pts": 7,
+        "breadth_drop_window_mins": 60,
+        "careful_max_target_ticks": 2,
+        "loss_stop_contracts": 2,
+        "loss_cooloff_mins": 30,
+        "flat_by_hhmm": 1245
+      }
+    }
+  }
+}

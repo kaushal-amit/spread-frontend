@@ -1,0 +1,22 @@
+{
+  "_captured": {
+    "url": "/api/performance/daily?from=2001-01-08&to=2001-01-08",
+    "status": 200,
+    "at": "2026-09-04T16:07:16.451Z",
+    "day": "2001-01-08",
+    "symbol": "SZTESTABAR"
+  },
+  "body": {
+    "days": [],
+    "summary": {
+      "sessions": 0,
+      "fills": 0,
+      "trips": 0,
+      "netKd": 0,
+      "commissionKd": 0,
+      "commissionPctOfLoss": null,
+      "winners": 0,
+      "losers": 0
+    }
+  }
+}
