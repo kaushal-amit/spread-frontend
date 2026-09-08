@@ -197,7 +197,14 @@ export interface TradeResult { ok?: boolean; warning?: string | null; commission
 
 /** Alerts the socket pushes into the feed. */
 export interface AlertMsg { kind: string; symbol?: string; level: 'danger' | 'warning' | 'info'; title: string; body: string; at: string }
-export interface EntryAlertMsg { symbol: string; fire: boolean; bidFils: number; offerFils: number; spreadFils: number; offerShares: number; myShares: number; estFillMins: number | null; depthSignal: string | null; reason: string; alertId?: number; audible?: boolean }
+export interface EntryAlertMsg { symbol: string; fire: boolean; bidFils: number; offerFils: number; spreadFils: number; offerShares: number; myShares: number; estFillMins: number | null; depthSignal: string | null; reason: string; alertId?: number; audible?: boolean; suppressed?: boolean; suppressedReason?: string | null }
+
+// ─── SPR-07/08 · the feed replays from the server (GET /api/feed) ───────────
+export interface FeedServerEvent { id: string; kind: 'entry' | 'halt'; symbol: string; at: string; level: string; title: string; body: string }
+
+// ─── SPR-27/30 · the capture-feed roster (GET /api/feeds, spread:feedHealth) ─
+export interface FeedScript { script: string; status: 'ok' | 'silent' | 'absent'; version?: string | null; rowsSeen?: number | null; problem?: string | null; lastSeenAt?: string | null; silentSec?: number | null }
+export interface FeedHealth { available: boolean; maxAgeSec?: number; scripts: FeedScript[] }
 export interface StrandedMsg { symbol: string; legId: number; message: string; options?: string[]; side?: 'BUY' | 'SELL'; code?: string; priceFils?: number; bidFils?: number; offerFils?: number | null; quoteAt?: string | null }
 
 /** GET /api/health — open without a token; 503 when `status` is 'stale'. */

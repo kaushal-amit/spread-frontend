@@ -12,7 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { apiGet, ApiError, socketOptions, socketUrl } from "./client";
-import type { AccountState, BoardUpdate, Budget, MarketDay, SessionInfo, StockCandidate, TradingContract, Detail, AlertMsg, EntryAlertMsg, StrandedMsg, WakeupMsg, HaltMsg, SlotStaleMsg } from "./types";
+import type { AccountState, BoardUpdate, Budget, MarketDay, SessionInfo, StockCandidate, TradingContract, Detail, AlertMsg, EntryAlertMsg, StrandedMsg, WakeupMsg, HaltMsg, SlotStaleMsg, FeedServerEvent, FeedHealth } from "./types";
+import { kuwaitHHMM } from "../lib/time";
 import { requestNotifyOnce, pushNotification, beep } from "../lib/notify";
 
 // ─── the shared socket ─────────────────────────────────────────────────────
@@ -134,6 +135,36 @@ export const isSelectableSession = (date: string, today: string | null, sessionD
 export const useMarket = () => usePolled<MarketDay>("/market", 60000);
 export const useContracts = (signal?: unknown) => usePolled<TradingContract[]>("/trading/contracts", 10000, signal);
 
+// ─── SPR-30 · the capture-feed roster, so the header can be honest ──────────
+// Polls /feeds and also takes the live `spread:feedHealth` push, so a feed
+// going silent shows within the scan interval without waiting for the poll.
+export function useFeeds(): Live<FeedHealth> {
+  const base = usePolled<FeedHealth>("/feeds", 60000);
+  const [data, setData] = useState<FeedHealth | null>(null);
+  useEffect(() => { setData(base.data); }, [base.data]);
+  useEffect(() => {
+    const s = getSocket();
+    const onHealth = (m: FeedHealth) => setData(m);
+    s.on("spread:feedHealth", onHealth);
+    return () => { s.off("spread:feedHealth", onHealth); };
+  }, []);
+  return { ...base, data };
+}
+
+// ─── SPR-07/08 · replay the feed from the server on mount ───────────────────
+// The feed was live-socket-only, so a reload lost everything the server had
+// recorded. This fetches TODAY's recorded events once; App seeds `feed` with
+// them so history survives a reload. Each event keeps its ORIGINAL time.
+const feedLevelClass = (level: string): string =>
+  level === "hot" ? "hot" : level === "warn" || level === "danger" ? "warn" : "info";
+export async function fetchFeedHistory(date?: string): Promise<Array<{ id: string; t: string; s: string; k: string; c: string; u: number; p: string }>> {
+  const rows = await apiGet<FeedServerEvent[]>("/feed", date ? { date } : undefined);
+  return rows.map((r) => ({
+    id: r.id, t: kuwaitHHMM(Date.parse(r.at)), s: r.symbol,
+    k: r.title.toUpperCase().slice(0, 40), c: feedLevelClass(r.level), u: 0, p: r.body,
+  }));
+}
+
 // ─── the detail page ───────────────────────────────────────────────────────
 
 /**
@@ -181,8 +212,15 @@ export function useAlerts(onAlert: (e: { s: string; k: string; c: string; p: str
   useEffect(() => {
     const s = getSocket();
     const alert = (m: AlertMsg) => onAlert({ s: m.symbol || "—", k: m.title.toUpperCase().slice(0, 40), c: m.level === "danger" ? "warn" : m.level === "warning" ? "hot" : "info", p: m.body, u: 1 });
-    const entry = (m: EntryAlertMsg) => onAlert({ s: m.symbol, k: `ENTRY · SPREAD ${m.spreadFils}`, c: "hot",
-      p: `Bid ${m.bidFils} / offer ${m.offerFils}. Offer ${m.offerShares.toLocaleString("en-US")} against your ${m.myShares.toLocaleString("en-US")}; fill ~${m.estFillMins ?? "?"} min${m.depthSignal ? ` · depth ${m.depthSignal}` : ""}.`, u: 1 });
+    // SPR-06/23 · a depth-vetoed entry is HELD: it belongs in the feed with its
+    // reason and the depth context, but it never rings the phone (c:'info', not
+    // 'hot'). A clean window is hot as before.
+    const entry = (m: EntryAlertMsg) => onAlert(
+      m.suppressed
+        ? { s: m.symbol, k: `ENTRY HELD · depth ${m.depthSignal ?? "—"}`, c: "info",
+            p: m.suppressedReason || `Window open (spread ${m.spreadFils}) but depth ${m.depthSignal ?? "—"} — held off the phone; only a BUY depth alerts.`, u: 1 }
+        : { s: m.symbol, k: `ENTRY · SPREAD ${m.spreadFils}`, c: "hot",
+            p: `Bid ${m.bidFils} / offer ${m.offerFils}. Offer ${m.offerShares.toLocaleString("en-US")} against your ${m.myShares.toLocaleString("en-US")}; fill ~${m.estFillMins ?? "?"} min${m.depthSignal ? ` · depth ${m.depthSignal}` : ""}.`, u: 1 });
     const stranded = (m: StrandedMsg) => onAlert({ s: m.symbol, k: "STRANDED ORDER", c: "warn", p: `${m.message}${m.options?.length ? " Options: " + m.options.join(" / ") : ""}`, u: 1 });
     const wake = (m: WakeupMsg) => { if (m.flagged?.length) onAlert({ s: "—", k: `WAKE-UP ${m.at}`, c: "hot", p: `${m.flagged.map((f) => f.symbol).join(", ")}${m.lowConfidence ? " — low confidence this early" : ""}`, u: 1 }); };
     // FLOW 6.7 · the halt-resume detector. The RESUME is the loud one — the verdict

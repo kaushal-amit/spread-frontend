@@ -12,7 +12,7 @@ import { ViewMode } from "../types";
 import { Maximize2, Minimize2, Columns2, BarChart2, MessageSquare, Edit2, Check } from "lucide-react";
 import { fmt } from "../utils/format";
 import { kuwaitHHMM } from "../lib/time";
-import type { AccountState, Budget, SessionInfo, MarketDay, TradingContract } from "../api/types";
+import type { AccountState, Budget, SessionInfo, MarketDay, TradingContract, FeedHealth } from "../api/types";
 import type { Live } from "../api/hooks";
 import { apiPost } from "../api/client";
 
@@ -27,6 +27,8 @@ interface TopBarProps {
   session: Live<SessionInfo>;
   market: Live<MarketDay>;
   contracts: Live<TradingContract[]>;
+  /** SPR-30 · the capture-feed roster, so a dead orders feed is never a fabricated FLAT. */
+  feeds: Live<FeedHealth>;
   errors: string[];
   connected: boolean;
   onBudgetSaved: () => void;
@@ -50,7 +52,7 @@ const staleTitle = <T,>(h: Live<T>) => (h.error && h.data ? `STALE — last refr
 
 export const TopBar: React.FC<TopBarProps> = ({
   account: accountLive, budget: budgetLive, session: sessionLive, market: marketLive, contracts: contractsLive,
-  errors, connected, onBudgetSaved, selectedDate, onDateChange, onToggleAdd,
+  feeds: feedsLive, errors, connected, onBudgetSaved, selectedDate, onDateChange, onToggleAdd,
   viewMode = "split", onViewModeChange, isFullscreen = false, onToggleFullscreen,
 }) => {
   const account = accountLive.data, budget = budgetLive.data, session = sessionLive.data,
@@ -95,11 +97,26 @@ export const TopBar: React.FC<TopBarProps> = ({
   };
 
   const open = (contracts || []).filter((c) => c.state !== "picked");
-  const posDisplay = open.length === 0 ? "FLAT" : open.length === 1
-    ? `LONG ${fmt(open[0].shares)} ${open[0].symbol}` : `${open.length} OPEN`;
+
+  // SPR-30 · a dead orders feed must not read as FLAT. The orders userscript
+  // feeds the positions; when it is silent or absent, "no open positions" is
+  // unknown, not a fact — so FLAT becomes an honest "FEED SILENT/ABSENT".
+  const feeds = feedsLive.data;
+  const ordersFeed = feeds?.available ? feeds.scripts.find((s) => s.script === "orders") : null;
+  const ordersDown = ordersFeed && ordersFeed.status !== "ok" ? ordersFeed.status : null;
+  const ordersSince = ordersFeed?.lastSeenAt
+    ? new Date(ordersFeed.lastSeenAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    : null;
+  const posDisplay = open.length === 0
+    ? (ordersDown ? (ordersDown === "absent" ? "ORDERS FEED ABSENT" : `ORDERS FEED SILENT${ordersSince ? ` · since ${ordersSince}` : ""}`) : "FLAT")
+    : open.length === 1 ? `LONG ${fmt(open[0].shares)} ${open[0].symbol}` : `${open.length} OPEN`;
   const posTooltip = open.length
     ? open.map((p) => `${p.symbol}: ${fmt(p.shares)} sh @ ${p.entry ?? "—"} (${fmt(Math.round(p.committedKd))} KD) [${p.state}]${p.markedAt === "entry" ? " — no quote today" : ""}`).join("\n")
+    : ordersDown ? `the orders feed is ${ordersDown}${ordersSince ? ` (last seen ${ordersSince})` : ""} — positions cannot be confirmed, so this is not a flat book${ordersFeed?.problem ? `\n${ordersFeed.problem}` : ""}`
     : contracts ? "No open positions" : placeholder(cSt);
+
+  // SPR-27/30 · any capture feed that is silent or absent, surfaced on the face.
+  const badFeeds = feeds?.available ? feeds.scripts.filter((s) => s.status !== "ok") : [];
 
   const pnl = account?.todayKd ?? null;
   const pnlPct = account && account.netDepositedKd ? (account.todayKd / account.netDepositedKd) * 100 : null;
@@ -162,9 +179,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         </span>
       </span>
 
-      <span className={`fld ${staleCls(cSt)}`} id="position-fld" title={staleTitle(contractsLive) ?? posTooltip} style={{ cursor: open.length ? "help" : "default" }}>
+      <span className={`fld ${staleCls(cSt)} ${ordersDown ? "warn" : ""}`} id="position-fld" title={staleTitle(contractsLive) ?? posTooltip} style={{ cursor: (open.length || ordersDown) ? "help" : "default" }}>
         <span className="k">POSITION</span>
-        <span className="v" id="posn" style={{ fontSize: "12px", letterSpacing: ".06em" }}>{contracts ? posDisplay : placeholder(cSt)}</span>
+        <span className={`v ${ordersDown ? "dn" : ""}`} id="posn" style={{ fontSize: "12px", letterSpacing: ".06em" }}>
+          {(contracts || ordersDown) ? posDisplay : placeholder(cSt)}
+        </span>
       </span>
 
       <span className={`fld free-fld ${freeClass} ${staleCls(bSt)}`} id="free-fld"
@@ -191,6 +210,16 @@ export const TopBar: React.FC<TopBarProps> = ({
           {market?.available && !market.isToday && <small className="prior-tag"> · prior close</small>}
         </span>
       </span>
+
+      {/* SPR-27/30 · a capture feed that stopped is shown here, not left to be
+          inferred from an empty board. `absent` never checked in; `silent`
+          checked in then stopped. */}
+      {badFeeds.length > 0 && (
+        <span className="fld" id="feed-health" title={badFeeds.map((s) => `${s.script}: ${s.status}${s.lastSeenAt ? ` — last seen ${new Date(s.lastSeenAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}${s.problem ? ` (${s.problem})` : ""}`).join("\n")}>
+          <span className="k">FEEDS</span>
+          <span className="v dn">{badFeeds.map((s) => `${s.script} ${s.status}`).join(" · ")}</span>
+        </span>
+      )}
 
       {/* 4.6 · the API chip: any failing fetch, or a socket that cannot connect. */}
       {(errors.length > 0 || !connected) && (

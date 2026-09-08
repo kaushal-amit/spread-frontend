@@ -2338,3 +2338,33 @@ body {
 /* R-22 · the stop line on the detail page. */
 .why.stopline b { font-variant-numeric: tabular-nums; }
 .why.stopline.warn { color: var(--warn, #f59e0b); }
+
+/* SPR-04/05 · the session-mode banner — the single, always-mounted source for
+   the trading mode. Bright and full-width so a STOP is not something you look
+   for. Colour comes from the mode, never re-derived from breadth here. */
+.session-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  letter-spacing: .04em;
+}
+.session-banner .session-banner-pip {
+  width: 8px; height: 8px; border-radius: 50%;
+  align-self: center; flex: 0 0 auto;
+}
+.session-banner .session-banner-title { font-weight: 700; }
+.session-banner .session-banner-why { color: var(--dim); }
+.session-banner .session-banner-breadth { color: var(--dim); margin-left: auto; }
+.session-banner.session-danger {
+  background: color-mix(in srgb, var(--stop) 14%, var(--bg));
+  color: var(--stop);
+}
+.session-banner.session-danger .session-banner-pip { background: var(--stop); }
+.session-banner.session-warning {
+  background: color-mix(in srgb, var(--wait) 14%, var(--bg));
+  color: var(--wait);
+}
+.session-banner.session-warning .session-banner-pip { background: var(--wait); }

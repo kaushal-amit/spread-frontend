@@ -19,6 +19,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { FeedEvent, AlertState, ViewMode } from "./types";
 import { TopBar } from "./components/TopBar";
 import { TabBar, type LiveChip } from "./components/TabBar";
+import { SessionBanner } from "./components/SessionBanner";
 import { SymbolSearch } from "./components/SymbolSearch";
 import { StockDetail } from "./components/StockDetail";
 import { TodayView } from "./components/TodayView";
@@ -28,7 +29,7 @@ import { BooksView } from "./live/BooksView";
 import "./live/books.css";
 import { FeedSection } from "./components/FeedSection";
 import { AskBar } from "./components/AskBar";
-import { useAccount, useAlerts, useBoard, useBudget, useContracts, useDetail, useMarket, useSession, useSessions, useReviewBoard, isSelectableSession } from "./api/hooks";
+import { useAccount, useAlerts, useBoard, useBudget, useContracts, useDetail, useMarket, useSession, useSessions, useReviewBoard, useFeeds, fetchFeedHistory, isSelectableSession } from "./api/hooks";
 import { Columns2, MessageSquare } from "lucide-react";
 
 type Tab = "TODAY" | "BOOKS" | "STATES" | { symbol: string };
@@ -55,6 +56,7 @@ export default function App() {
   const session = useSession();
   const market = useMarket();
   const contractsLive = useContracts(board.tick);
+  const feeds = useFeeds();
 
   const [tab, setTab] = useState<Tab>("TODAY");
   const curSymbol = typeof tab === "object" ? tab.symbol : null;
@@ -114,6 +116,23 @@ export default function App() {
   }, [addFeed, curSymbol]);
   useAlerts(onAlert);
   useEffect(() => () => { if (alertTimerRef.current) clearTimeout(alertTimerRef.current); }, []);
+
+  // SPR-07/08 · replay the feed from the server once, so a reload does not lose
+  // the entry windows and halt resumes the server recorded. Merged above the
+  // boot line, newest first; live pushes then prepend on top. De-duped by id so
+  // a live event that also comes back in the replay is not shown twice.
+  const feedSeeded = useRef(false);
+  useEffect(() => {
+    if (feedSeeded.current) return;
+    feedSeeded.current = true;
+    fetchFeedHistory()
+      .then((hist) => setFeed((prev) => {
+        const ids = new Set(prev.map((e) => e.id));
+        const add = hist.filter((e) => !ids.has(e.id));
+        return [...add, ...prev].slice(0, 400);
+      }))
+      .catch(() => { /* a feed that will not replay is not a reason to block the terminal */ });
+  }, []);
 
   // ── navigation ──────────────────────────────────────────────────────────
   const openSymbol = useCallback((symbol: string) => {
@@ -182,7 +201,7 @@ export default function App() {
       <ErrorBoundary name="TOPBAR">
       <TopBar
         account={account} budget={budgetLive} session={session} market={market}
-        contracts={contractsLive} errors={apiErrors} connected={board.connected}
+        contracts={contractsLive} feeds={feeds} errors={apiErrors} connected={board.connected}
         onBudgetSaved={() => { budgetLive.refresh(); board.refresh(); }}
         selectedDate={selectedDate} onDateChange={onDatePicked}
         onToggleAdd={() => setShowSearch((p) => !p)}
@@ -196,6 +215,10 @@ export default function App() {
         cur={curIndex} curSymbol={curSymbol} alert={alert}
         onPick={pickTab} onClose={() => setTab("TODAY")} onPopGo={handlePopGo}
       />
+
+      {/* SPR-04/05 · session mode, from the tick — the single source, always
+          mounted so it never blinks out on a view switch (SPR-15). */}
+      <SessionBanner stops={board.data?.stops} />
 
       <SymbolSearch show={showSearch} all={board.data?.all || []}
         onPick={(s) => { openSymbol(s); setShowSearch(false); }} onClose={() => setShowSearch(false)} />
