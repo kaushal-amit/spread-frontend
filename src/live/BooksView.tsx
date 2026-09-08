@@ -108,7 +108,7 @@ export const BooksView: React.FC = () => {
         <div className="movers-head">
           moved today · ranked, not filtered
         </div>
-        {movers.length === 0 && !loadError && <div className="book-dim">{boardLoaded ? "the board is empty — no symbol reached the funnel" : "loading the board…"}</div>}
+        {movers.length === 0 && !loadError && <div className="book-dim">{boardLoaded ? "board loaded — no symbol has moved into range yet" : "loading the board…"}</div>}
         {movers.slice(0, 20).map((m) => (
           <div key={m.symbol} className="mover">
             <span className="mover-sym">{m.symbol}</span>

@@ -174,6 +174,9 @@ export const TopBar: React.FC<TopBarProps> = ({
         <span className={`v ${breadthClass}`} id="brv">
           {market?.available ? `${market.breadthPct.toFixed(0)}%` : market ? "no row" : placeholder(mSt)}
           {market?.available && <small>{market.up}▲ {market.down}▼</small>}
+          {/* SPR-12 · this is the prior session's close, not live — say so on the
+              face, not only in the tooltip, so it is never read as live breadth. */}
+          {market?.available && !market.isToday && <small className="prior-tag"> · prior close</small>}
         </span>
       </span>
 
