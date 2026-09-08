@@ -60,26 +60,38 @@ export const TopBar: React.FC<TopBarProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [budgetString, setBudgetString] = useState(slot == null ? "" : String(slot));
   const [saveError, setSaveError] = useState<string | null>(null);
+  // SPR-11 · show the saved value at once instead of waiting ~2-3s for the next
+  // /budget poll. `shown` is the optimistic value until the poll catches up.
+  const [optimistic, setOptimistic] = useState<number | null>(null);
+  const shown = optimistic ?? slot;
 
-  useEffect(() => { if (!isEditing && slot != null) setBudgetString(String(slot)); }, [slot, isEditing]);
+  useEffect(() => { if (!isEditing && shown != null) setBudgetString(String(shown)); }, [shown, isEditing]);
+  useEffect(() => { if (optimistic != null && slot === optimistic) setOptimistic(null); }, [slot, optimistic]);
 
   const submit = async () => {
     const val = parseFloat(budgetString);
     setIsEditing(false);
-    if (Number.isNaN(val) || val < 100 || val === slot) { setBudgetString(slot == null ? "" : String(slot)); return; }
+    // SPR-11 · a refused value says WHY, instead of silently reverting.
+    if (Number.isNaN(val) || val < 100) {
+      setSaveError("minimum budget is 100 KD");
+      setBudgetString(shown == null ? "" : String(shown));
+      return;
+    }
+    if (val === shown) { setBudgetString(String(val)); return; }   // no change — no noise
     try {
       await apiPost("/gates", { changes: { "session-budget": val }, changedBy: "topbar" }, "PUT");
       setSaveError(null);
+      setOptimistic(val);          // header reflects the save immediately
       onBudgetSaved();
     } catch (e: any) {
       setSaveError(e?.message || "save failed");
-      setBudgetString(slot == null ? "" : String(slot));
+      setBudgetString(shown == null ? "" : String(shown));
     }
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") submit();
-    else if (e.key === "Escape") { setBudgetString(slot == null ? "" : String(slot)); setIsEditing(false); }
+    else if (e.key === "Escape") { setBudgetString(shown == null ? "" : String(shown)); setIsEditing(false); setSaveError(null); }
   };
 
   const open = (contracts || []).filter((c) => c.state !== "picked");
@@ -120,8 +132,8 @@ export const TopBar: React.FC<TopBarProps> = ({
       <button className="addbtn" id="add-stock-btn" onClick={onToggleAdd}>+ ADD</button>
 
       <span className={`fld budget-fld ${isEditing ? "editing" : ""} ${staleCls(bSt)}`} id="budget-fld"
-        onClick={() => { if (!isEditing && slot != null) setIsEditing(true); }}
-        title={saveError ? `Save failed: ${saveError}` : "The slot the board screens with. Click to edit — saved to the gate store."}>
+        onClick={() => { if (!isEditing && shown != null) setIsEditing(true); }}
+        title={saveError ? saveError : "The slot the board screens with. Click to edit — saved to the gate store."}>
         <span className="k">SLOT</span>
         {isEditing ? (
           <span className="budget-edit-box">
@@ -131,7 +143,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           </span>
         ) : (
           <span className={`v budget-val-display ${saveError ? "dn" : ""}`} id="cash">
-            {slot == null ? placeholder(bSt) : slot.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+            {shown == null ? placeholder(bSt) : shown.toLocaleString(undefined, { minimumFractionDigits: 0 })}
             <Edit2 size={10} className="budget-edit-icon" />
           </span>
         )}
