@@ -58,23 +58,31 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
 // ─── the board ─────────────────────────────────────────────────────────────
 export interface Board {
   recommended: StockCandidate[]; nearMiss: StockCandidate[]; rejected: StockCandidate[];
+  // SPR-38 · NOT COMPUTED is its own bucket, never counted as rejected.
+  notComputed: StockCandidate[];
   all: StockCandidate[]; counts: Record<string, number>; tradingDay: string | null; budgetKd: number | null;
   reach: BoardUpdate["reach"]; stops: BoardUpdate["stops"] | null;
 }
 
-export function useBoard(): Live<Board> & { connected: boolean; tick: number } {
+export function useBoard(): Live<Board> & { connected: boolean; tick: number; disconnectedSince: number | null } {
   const [data, setData] = useState<Board | null>(null);
   const [error, setError] = useState<ApiError | Error | null>(null);
   const [loading, setLoading] = useState(true);
   const [at, setAt] = useState<number | null>(null);
   const [connected, setConnected] = useState(false);
+  // SPR-33 · when the push channel dropped, so the UI can say "since HH:MM"
+  // instead of leaving a stale board looking live.
+  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
   const [tick, setTick] = useState(0);
 
-  const fromUpdate = (u: BoardUpdate): Board => ({
-    recommended: u.recommended, nearMiss: u.nearMiss, rejected: u.rejected,
-    all: [...u.recommended, ...u.nearMiss, ...u.rejected],
-    counts: u.counts, tradingDay: u.tradingDay, budgetKd: u.budgetKd, reach: u.reach, stops: u.stops ?? null,
-  });
+  const fromUpdate = (u: BoardUpdate): Board => {
+    const notComputed = u.notComputed ?? [];
+    return {
+      recommended: u.recommended, nearMiss: u.nearMiss, rejected: u.rejected, notComputed,
+      all: [...u.recommended, ...u.nearMiss, ...u.rejected, ...notComputed],
+      counts: u.counts, tradingDay: u.tradingDay, budgetKd: u.budgetKd, reach: u.reach, stops: u.stops ?? null,
+    };
+  };
 
   const refresh = useCallback(() => {
     // REST seed: /stocks is every symbol; split by status.
@@ -84,6 +92,7 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number } {
           recommended: rows.filter((r) => r.status === "recommended"),
           nearMiss: rows.filter((r) => r.status === "near_miss"),
           rejected: rows.filter((r) => r.status === "rejected"),
+          notComputed: rows.filter((r) => r.status === "not_computed"),
           all: rows, counts: {}, tradingDay: null, budgetKd: null, reach: null, stops: null,
         });
         setError(null); setAt(Date.now());
@@ -97,16 +106,21 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number } {
     const s = getSocket();
     const onUpdate = (u: BoardUpdate) => { setData(fromUpdate(u)); setError(null); setAt(Date.now()); setLoading(false); setTick((t) => t + 1); };
     const onErr = (e: any) => setError(new ApiError(0, e?.data?.code || "SOCKET", e?.message || "socket error"));
-    s.on("connect", () => setConnected(true));
-    s.on("disconnect", () => setConnected(false));
+    const onConnect = () => { setConnected(true); setDisconnectedSince(null); };
+    const onDisconnect = () => { setConnected(false); setDisconnectedSince((prev) => prev ?? Date.now()); };
+    s.on("connect", onConnect);
+    s.on("disconnect", onDisconnect);
     s.on("connect_error", onErr);
     s.on("spread:update", onUpdate);
     s.on("spread:error", (e: any) => setError(new ApiError(400, e.code, e.error)));
     if (s.connected) setConnected(true);
-    return () => { s.off("spread:update", onUpdate); s.off("connect_error", onErr); };
+    // Not connected on mount and not yet dropped-from-connected: still mark a
+    // start time so a channel that never attaches is visible, not silent.
+    else setDisconnectedSince((prev) => prev ?? Date.now());
+    return () => { s.off("connect", onConnect); s.off("disconnect", onDisconnect); s.off("spread:update", onUpdate); s.off("connect_error", onErr); };
   }, [refresh]);
 
-  return { data, error, loading, at, refresh, connected, tick };
+  return { data, error, loading, at, refresh, connected, tick, disconnectedSince };
 }
 
 export const useAccount = (signal?: unknown) => usePolled<AccountState>("/account", 15000, signal);

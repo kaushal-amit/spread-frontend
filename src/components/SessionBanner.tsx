@@ -23,11 +23,13 @@ const COPY: Record<string, { cls: string; title: string }> = {
   stop:    { cls: "danger",  title: "STOP — the day is over for new positions" },
   cooloff: { cls: "danger",  title: "NO RE-ENTRY — 30 minutes after a loss" },
   careful: { cls: "warning", title: "CAREFUL — one position at a time" },
+  // SPR-37 · the trading day is over; the engine stops evaluating.
+  closed:  { cls: "muted",   title: "MARKET CLOSED — the trading day is over" },
 };
 
 export function SessionBanner({ stops }: { stops: SessionStops | null | undefined }) {
   if (!stops) return null;
-  const restrictive = stops.mode === "stop" || stops.mode === "cooloff" || stops.mode === "careful";
+  const restrictive = stops.mode === "stop" || stops.mode === "cooloff" || stops.mode === "careful" || stops.mode === "closed";
   // A mode we don't have copy for that still blocks opening is shown plainly
   // rather than swallowed — never a silent "you may trade" when you may not.
   if (!restrictive && stops.canOpen) return null;

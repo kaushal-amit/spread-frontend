@@ -62,8 +62,14 @@ export default function App() {
   const curSymbol = typeof tab === "object" ? tab.symbol : null;
   const detail = useDetail(curSymbol, board.tick);
 
-  const apiErrors = [board, account, budgetLive, session, market, contractsLive, detail]
-    .filter((h) => h.error).map((h) => `${(h.error as any).code || "ERR"}: ${h.error!.message}`);
+  // SPR-39 · name the failing call. "API · 1 failing" with no endpoint is a dead
+  // end; each error now carries its source so the chip and tooltip say which.
+  const apiErrors = ([
+    ["/stocks", board], ["/account", account], ["/budget", budgetLive], ["/session", session],
+    ["/market", market], ["/trading/contracts", contractsLive], ["/stocks/:sym/detail", detail],
+  ] as const)
+    .filter(([, h]) => h.error)
+    .map(([name, h]) => `${name} — ${(h.error as any).code || "ERR"}: ${h.error!.message}`);
 
   const [showSearch, setShowSearch] = useState(false);
   // 4.3 · the session day is the SERVER's (rolls at 04:00 Kuwait). Until
@@ -215,6 +221,19 @@ export default function App() {
         cur={curIndex} curSymbol={curSymbol} alert={alert}
         onPick={pickTab} onClose={() => setTab("TODAY")} onPopGo={handlePopGo}
       />
+
+      {/* SPR-33 · a dropped push channel is SHOWN, not left reading "live" on
+          stale data. Appears once the board has loaded at least once and the
+          socket is not connected; socket.io reconnects underneath. */}
+      {!board.connected && board.at != null && (
+        <div className="session-banner session-danger" id="conn-banner" role="status">
+          <span className="session-banner-pip" />
+          <span className="session-banner-title">LIVE FEED LOST — reconnecting…</span>
+          <span className="session-banner-why">
+            {board.disconnectedSince ? `since ${kuwaitHHMM(board.disconnectedSince)} Kuwait · ` : ""}showing the last update, not live
+          </span>
+        </div>
+      )}
 
       {/* SPR-04/05 · session mode, from the tick — the single source, always
           mounted so it never blinks out on a view switch (SPR-15). */}

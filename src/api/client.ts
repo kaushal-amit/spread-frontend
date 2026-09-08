@@ -50,10 +50,23 @@ export async function apiPost<T>(path: string, body: unknown, method: 'POST' | '
   return parse<T>(r);
 }
 
-/** The socket connects to the same origin as the API, with the same secret. */
+/**
+ * The socket connects to the same origin as the API, with the same secret.
+ *
+ * SPR-33 · reconnection is made EXPLICIT: a push channel that dropped (or never
+ * attached) on load must keep trying, forever, with backoff — a silent gap that
+ * leaves the page reading "live" on stale data is the failure this system
+ * produces most. The UI shows the disconnection (App's connection banner); this
+ * is the machinery that heals it.
+ */
 export const socketOptions = () => ({
   path: '/socket.io',
   transports: ['websocket', 'polling'],
   auth: API_TOKEN ? { token: API_TOKEN } : {},
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 8000,
+  timeout: 8000,
 });
 export const socketUrl = API_BASE || undefined;

@@ -2368,3 +2368,11 @@ body {
   color: var(--wait);
 }
 .session-banner.session-warning .session-banner-pip { background: var(--wait); }
+
+/* SPR-37 · the market-closed banner — informational, not an alarm. */
+.session-banner.session-muted {
+  background: var(--panel);
+  color: var(--dim);
+}
+.session-banner.session-muted .session-banner-pip { background: var(--dimmer); }
+.session-banner.session-muted .session-banner-title { color: var(--txt); }

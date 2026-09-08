@@ -11,7 +11,7 @@ export interface GateGroup { groupName: string; cells: GateCell[] }
 export interface BehaviourFlag { flag: string; icon: string; label: string; why: string }
 
 export type Verdict = 'TRADABLE' | 'NEAR_MISS' | 'NOT_RECOMMENDED' | 'REJECTED' | 'OUT_OF_REACH' | 'DEAD';
-export type Status = 'recommended' | 'near_miss' | 'rejected';
+export type Status = 'recommended' | 'near_miss' | 'rejected' | 'not_computed';
 
 export interface StockCandidate {
   symbol: string; nameAr?: string;
@@ -90,8 +90,10 @@ export interface Budget {
  */
 export interface SessionStops {
   day: string; now: string; clock: string;
-  mode: 'trade' | 'careful' | 'cooloff' | 'stop' | 'unknown' | 'pre_open';
+  mode: 'trade' | 'careful' | 'cooloff' | 'stop' | 'unknown' | 'pre_open' | 'closed';
   canOpen: boolean; maxTargetTicks: number | null; flatBy: string; pastFlatBy: boolean;
+  // SPR-37 · the exchange phase (awsat_market_quotes.session) and the closed flag.
+  marketPhase?: string | null; closed?: boolean;
   reasons: string[];
   market: {
     verdict: 'trade' | 'careful' | 'stop' | 'unknown'; reason: string; breadthPct: number | null; clock?: string;
@@ -129,6 +131,8 @@ export interface MarketDay {
 export interface BoardUpdate {
   tradingDay: string; budgetKd: number;
   recommended: StockCandidate[]; nearMiss: StockCandidate[]; rejected: StockCandidate[];
+  // SPR-38 · cards that fail only on NOT COMPUTED gates — their own bucket.
+  notComputed?: StockCandidate[];
   counts: Record<string, number>; reach: { reachable: number; total: number; note: string } | null;
   session: { open: boolean; phase: string; note: string }; coverage: unknown;
   stops?: SessionStops;

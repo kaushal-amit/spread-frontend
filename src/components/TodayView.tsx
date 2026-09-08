@@ -59,6 +59,11 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   const boardStale = !!board && (!connected || (boardAge != null && boardAge > 120));
   const openSyms = new Set(open.map((c) => c.symbol));
 
+  // SPR-39 · the change is stored as a float; round it to the tick on the card
+  // the same way the review table does (SPR-10) — no ▼0.8999999999999986.
+  const chgFil = (chg: number, price: number | null | undefined) =>
+    Math.abs(chg).toFixed(price != null && Number(price) < 100 ? 1 : 0);
+
   const rec = board?.recommended ?? [];
   const near = board?.nearMiss ?? [];
   const rej = board?.rejected ?? [];
@@ -92,7 +97,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
       <div key={`${s.symbol}-${cls}`} className={`pl ${cls === "near" ? "open" : cls} ${s.notComputed?.length ? "nc" : ""}`}
         id={`plan-card-${s.symbol}`} onClick={() => onPickSymbol(s.symbol)} title={s.careful || ""}>
         <span className="s">{s.symbol}{s.market && /premier/i.test(s.market) ? <sup title="Premier Market: 0.10%"> P</sup> : null}</span>
-        <span className="p">{s.price}{s.changeFils ? <small className={s.changeFils > 0 ? "up" : "dn"}> {s.changeFils > 0 ? "▲" : "▼"}{Math.abs(s.changeFils)}</small> : null}</span>
+        <span className="p">{s.price}{s.changeFils ? <small className={s.changeFils > 0 ? "up" : "dn"}> {s.changeFils > 0 ? "▲" : "▼"}{chgFil(s.changeFils, s.price)}</small> : null}</span>
         <span className="w">{why}</span>
         {cls === "go" && <span className="rg">{fmt(s.shares)} sh · net {kd(s.netKd)}{m45Tag(s)}</span>}
         {cls !== "go" && s.behaviourFlags?.length ? <span className="rg">{s.behaviourFlags.map((b) => b.label).join(" · ")}{m45Tag(s)}</span> : null}
@@ -164,7 +169,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         {boardError ? <b className="dn">BOARD UNAVAILABLE — {(boardError as any).code || "error"}: {boardError.message}</b>
           : boardLoading && !board ? "Loading the board…"
           : board ? <>
-              {board.tradingDay ? `Session ${board.tradingDay}` : "Board"} · {all.length} symbols · <b>{rec.length}</b> recommended · <b>{near.length}</b> one gate away · {rej.length} rejected
+              {board.tradingDay ? `Session ${board.tradingDay}` : "Board"} · {all.length} symbols · <b>{rec.length}</b> recommended · <b>{near.length}</b> one gate away · {rej.length} rejected{notComputed.length ? ` · ${notComputed.length} not computed` : ""}
               {board.budgetKd ? ` · slot ${fmt(board.budgetKd)} KD` : ""}
               {boardStale
                 ? <b className="dn"> · STALE — {connected ? `last update ${ageLabel(boardAge)} ago` : "not connected"}{boardAt ? ` (${kuwaitHHMM(boardAt)} Kuwait)` : ""}</b>
@@ -220,11 +225,22 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         </div>
       )}
 
+      {/* SPR-38 · the third bucket. These are not rejected — a gate could not be
+          computed for want of a number. Shown apart so the board never reads
+          "140 rejected" over cards that never failed a stock. */}
+      {notComputed.length > 0 && (
+        <div className="plgrp">
+          <span className="plk">NOT COMPUTED · {notComputed.length}</span>
+          {notComputed.slice(0, 6).map((s) => card(s, "no"))}
+          {notComputed.length > 6 && <div className="pl none">and {notComputed.length - 6} more — a statistic is missing, not a failed stock</div>}
+        </div>
+      )}
+
       {board && Object.keys(board.counts).length > 0 && (
         <p className="plan" style={{ marginTop: 16 }} id="board-gate-counts">
           Failures by gate:{" "}
           {Object.entries(board.counts)
-            .filter(([k]) => !["all", "recommended", "nearMiss", "rejected", "noQuotes", "noStats"].includes(k))
+            .filter(([k]) => !["all", "recommended", "nearMiss", "rejected", "notComputed", "noQuotes", "noStats"].includes(k))
             .sort((a, b) => b[1] - a[1])
             .map(([k, v]) => `${k} ${v}`).join(" · ")}
         </p>

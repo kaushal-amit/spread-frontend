@@ -146,7 +146,9 @@ export const TopBar: React.FC<TopBarProps> = ({
     modeText = session.phase === "pre_open" ? "PRE-OPEN" : session.phase === "closed" ? "CLOSED"
       : session.phase === "step_down" ? (mins != null && mins > 0 ? `STEP-DOWN in ${mins}m` : "STEP-DOWN now")
       : session.phase === "peak" ? "PEAK" : "LIVE";
-    modeClass = session.open ? "live" : session.phase === "pre_open" ? "plan" : "past";
+    // SPR-33 · "live" styling requires the push channel, not just an open
+    // session — a dropped socket must not keep the pill lit green.
+    modeClass = session.open ? (connected ? "live" : "past") : session.phase === "pre_open" ? "plan" : "past";
   }
 
   return (
@@ -226,11 +228,17 @@ export const TopBar: React.FC<TopBarProps> = ({
         </span>
       )}
 
-      {/* 4.6 · the API chip: any failing fetch, or a socket that cannot connect. */}
+      {/* 4.6 · the API chip: any failing fetch, or a socket that cannot connect.
+          SPR-39 · a single failure names its endpoint on the face; the tooltip
+          lists all of them with the code and message — never a bare "1 failing". */}
       {(errors.length > 0 || !connected) && (
         <span className="fld" id="api-errors" title={[...errors, connected ? null : "socket: not connected — the board is not live"].filter(Boolean).join("\n")}>
           <span className="k">API</span>
-          <span className="v dn">{errors.length ? `${errors.length} failing` : "not live"}{errors.length && !connected ? " · not live" : ""}</span>
+          <span className="v dn">
+            {errors.length === 1 ? `${errors[0].split(" — ")[0]} failing`
+              : errors.length ? `${errors.length} failing` : "not live"}
+            {errors.length && !connected ? " · not live" : ""}
+          </span>
         </span>
       )}
 
