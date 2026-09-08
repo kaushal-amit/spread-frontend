@@ -33,6 +33,20 @@ import { Columns2, MessageSquare } from "lucide-react";
 
 type Tab = "TODAY" | "BOOKS" | "STATES" | { symbol: string };
 
+// SPR-10 · review-table rendering. The stored values are clean; the damage was
+// all in the render: raw floats (0.9000000000000057), no thousands separators
+// (volume and trades ran together), and a "quality" header on a capture-coverage
+// column. chg rounds to the tick — 1 decimal under 100 fils, integer at/above.
+const rvNumStyle: React.CSSProperties = { padding: "2px 14px 2px 0", textAlign: "right", fontVariantNumeric: "tabular-nums" };
+const rvTxtStyle: React.CSSProperties = { padding: "2px 14px 2px 0", textAlign: "left" };
+const rvInt = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("en-US"));
+const rvChg = (chg: number | null | undefined, close: number | null | undefined) => {
+  if (chg == null) return "—";
+  const n = Number(chg);
+  const dp = close != null && Number(close) < 100 ? 1 : 0;
+  return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toFixed(dp);
+};
+
 export default function App() {
   // ── live state ──────────────────────────────────────────────────────────
   const board = useBoard();
@@ -232,12 +246,21 @@ export default function App() {
                       {reviewBoard.loading && <p className="hint">loading the session…</p>}
                       {reviewBoard.error && <p className="plan warn">could not load {selectedDate}: {reviewBoard.error.message}</p>}
                       {reviewBoard.data && (
-                        <table className="review-table" id="review-symbols">
-                          <thead><tr><th>symbol</th><th>close</th><th>chg</th><th>volume</th><th>trades</th><th>quality</th></tr></thead>
+                        <table className="review-table" id="review-symbols" style={{ borderCollapse: "collapse" }}>
+                          <thead><tr>
+                            <th style={rvTxtStyle}>symbol</th><th style={rvNumStyle}>close</th><th style={rvNumStyle}>chg</th>
+                            <th style={rvNumStyle}>volume</th><th style={rvNumStyle}>trades</th><th style={rvTxtStyle}>capture</th>
+                          </tr></thead>
                           <tbody>
                             {reviewBoard.data.symbols.map((s) => (
-                              <tr key={s.symbol}><td>{s.symbol}</td><td>{s.close_px ?? "—"}</td><td>{s.chg_fils ?? "—"}</td>
-                                <td>{s.total_volume ?? "—"}</td><td>{s.trades ?? "—"}</td><td>{s.data_quality ?? "—"}</td></tr>
+                              <tr key={s.symbol}>
+                                <td style={rvTxtStyle}>{s.symbol}</td>
+                                <td style={rvNumStyle}>{s.close_px ?? "—"}</td>
+                                <td style={rvNumStyle}>{rvChg(s.chg_fils, s.close_px)}</td>
+                                <td style={rvNumStyle}>{rvInt(s.total_volume)}</td>
+                                <td style={rvNumStyle}>{rvInt(s.trades)}</td>
+                                <td style={rvTxtStyle}>{s.data_quality ?? "—"}</td>
+                              </tr>
                             ))}
                           </tbody>
                         </table>
