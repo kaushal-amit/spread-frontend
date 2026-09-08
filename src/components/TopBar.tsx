@@ -139,8 +139,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   if (today && selectedDate && selectedDate < today) { modeText = "REVIEW"; modeClass = "past"; }
   else if (today && selectedDate && selectedDate > today) { modeText = "PLANNING"; modeClass = "plan"; }
   else if (session) {
+    // SPR-21 · STEP-DOWN read like a button. It is a TIME, not a control: the
+    // afternoon drift-down is approaching (or here). Show the countdown from the
+    // server's minutesToStepDown so it reads as "when", not "click me".
+    const mins = session.minutesToStepDown;
     modeText = session.phase === "pre_open" ? "PRE-OPEN" : session.phase === "closed" ? "CLOSED"
-      : session.phase === "step_down" ? "STEP-DOWN" : session.phase === "peak" ? "PEAK" : "LIVE";
+      : session.phase === "step_down" ? (mins != null && mins > 0 ? `STEP-DOWN in ${mins}m` : "STEP-DOWN now")
+      : session.phase === "peak" ? "PEAK" : "LIVE";
     modeClass = session.open ? "live" : session.phase === "pre_open" ? "plan" : "past";
   }
 
