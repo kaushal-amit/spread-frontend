@@ -2376,3 +2376,6 @@ body {
 }
 .session-banner.session-muted .session-banner-pip { background: var(--dimmer); }
 .session-banner.session-muted .session-banner-title { color: var(--txt); }
+
+/* SPR-35 · feed bodies wrap any long token instead of overflowing sideways. */
+.chat-q-body, .chat-a-body, .ev p, .ev .eb { overflow-wrap: anywhere; word-break: break-word; }

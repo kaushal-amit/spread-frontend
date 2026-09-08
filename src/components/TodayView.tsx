@@ -148,21 +148,10 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         </div>
       )}
 
-      {/* ── R-19 / R-20 · the market gate and the session stops, loud and first ── */}
-      {board?.stops && board.stops.mode !== 'trade' && board.stops.mode !== 'pre_open' && (
-        <div className={`stopbar ${board.stops.canOpen ? 'careful' : 'stopped'}`} id="session-stops" role="alert">
-          <b>{board.stops.mode === 'careful' ? 'CAREFUL — one position, take 2 fils'
-            : board.stops.mode === 'cooloff' ? 'NO RE-ENTRY — 30 minutes after a loss'
-            : board.stops.mode === 'stop' ? 'STOP — no new position'
-            : 'MARKET GATE NOT COMPUTED'}</b>
-          {board.stops.reasons.length > 0 && <span className="stopwhy"> {board.stops.reasons.join(' · ')}</span>}
-          {(() => {
-            const rd = board.stops.market?.readings;
-            const seen = rd ? ['0900', '0930', '1000'].map((k) => rd[k]).filter(Boolean).map((r) => `${r!.clock} ${r!.breadthPct}%`) : [];
-            return seen.length ? <span className="stopread"> · breadth {seen.join(' → ')}</span> : null;
-          })()}
-        </div>
-      )}
+      {/* SPR-40 · the session mode is shown ONCE, by the always-mounted
+          SessionBanner (SPR-04/05) — one state, one label, on every tab. The
+          TodayView stopbar that used to duplicate it here (with a different
+          wording, "STOP — no new position") is gone. */}
 
       {/* ── state line: loud, not plausible ── */}
       <p className="plan" id="board-state">
@@ -171,9 +160,11 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
           : board ? <>
               {board.tradingDay ? `Session ${board.tradingDay}` : "Board"} · {all.length} symbols · <b>{rec.length}</b> recommended · <b>{near.length}</b> one gate away · {rej.length} rejected{notComputed.length ? ` · ${notComputed.length} not computed` : ""}
               {board.budgetKd ? ` · slot ${fmt(board.budgetKd)} KD` : ""}
-              {boardStale
-                ? <b className="dn"> · STALE — {connected ? `last update ${ageLabel(boardAge)} ago` : "not connected"}{boardAt ? ` (${kuwaitHHMM(boardAt)} Kuwait)` : ""}</b>
-                : connected ? " · live" : " · not connected — showing the last fetch"}
+              {board.stops?.mode === "closed"
+                ? <b> · market closed</b>
+                : boardStale
+                  ? <b className="dn"> · STALE — {connected ? `last update ${ageLabel(boardAge)} ago` : "not connected"}{boardAt ? ` (${kuwaitHHMM(boardAt)} Kuwait)` : ""}</b>
+                  : connected ? " · live" : " · not connected — showing the last fetch"}
             </> : null}
       </p>
       {contractsLive.error && !contracts && (

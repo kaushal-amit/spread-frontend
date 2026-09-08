@@ -35,6 +35,9 @@ interface TopBarProps {
   /** The server's session day; null until /api/session has answered. */
   selectedDate: string | null;
   onDateChange: (date: string) => void;
+  /** SPR-36 · bound the date input so impossible dates never round-trip. */
+  minDate?: string;
+  maxDate?: string;
   onToggleAdd: () => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
@@ -52,7 +55,7 @@ const staleTitle = <T,>(h: Live<T>) => (h.error && h.data ? `STALE — last refr
 
 export const TopBar: React.FC<TopBarProps> = ({
   account: accountLive, budget: budgetLive, session: sessionLive, market: marketLive, contracts: contractsLive,
-  feeds: feedsLive, errors, connected, onBudgetSaved, selectedDate, onDateChange, onToggleAdd,
+  feeds: feedsLive, errors, connected, onBudgetSaved, selectedDate, onDateChange, minDate, maxDate, onToggleAdd,
   viewMode = "split", onViewModeChange, isFullscreen = false, onToggleFullscreen,
 }) => {
   const account = accountLive.data, budget = budgetLive.data, session = sessionLive.data,
@@ -243,9 +246,13 @@ export const TopBar: React.FC<TopBarProps> = ({
       )}
 
       <span className="dpick" id="date-picker-wrap">
-        <input type="date" id="dsel" value={selectedDate ?? ""} disabled={selectedDate == null} onChange={(e) => onDateChange(e.target.value)} aria-label="Session date"
+        <input type="date" id="dsel" value={selectedDate ?? ""} disabled={selectedDate == null} min={minDate} max={maxDate} onChange={(e) => onDateChange(e.target.value)} aria-label="Session date"
           title={selectedDate == null ? "waiting for /api/session — the session day is the server's" : "the server's session day (rolls 04:00 Kuwait)"} />
-        <span className={`mode ${modeClass}`} id="dmode" title={session?.note || ""}>{modeText}{session?.timeStr ? ` ${session.timeStr}` : ""}</span>
+        {/* SPR-42 · the mode label alone. The trailing clock always read "now",
+            never the event's time (STEP-DOWN 11:31 was the current time, not the
+            step-down time), so it read like a broken control. The mode words say
+            when; the wall clock belongs elsewhere. */}
+        <span className={`mode ${modeClass}`} id="dmode" title={session?.note || ""}>{modeText}</span>
       </span>
 
       {onViewModeChange && (

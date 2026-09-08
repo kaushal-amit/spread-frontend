@@ -210,6 +210,8 @@ export default function App() {
         contracts={contractsLive} feeds={feeds} errors={apiErrors} connected={board.connected}
         onBudgetSaved={() => { budgetLive.refresh(); board.refresh(); }}
         selectedDate={selectedDate} onDateChange={onDatePicked}
+        minDate={(sessions.data?.sessions ?? []).reduce<string | undefined>((m, s) => (m == null || s.date < m ? s.date : m), undefined)}
+        maxDate={today ?? undefined}
         onToggleAdd={() => setShowSearch((p) => !p)}
         viewMode={viewMode} onViewModeChange={setViewMode}
         isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}

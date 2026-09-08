@@ -26,7 +26,10 @@ export const AskBar: React.FC<AskBarProps> = ({ curSymbol, onAddFeedEvent }) => 
     setAsking(true);
     setQuestion("");
 
-    // Add user question to feed
+    // Add user question to feed. SPR-35 · the ECHO is capped so a very long
+    // question (the 5,000-char case) cannot render as one line that overflows
+    // the feed sideways. The full text still goes to the server below.
+    const echo = v.length > 600 ? `${v.slice(0, 600)}… (${v.length} chars)` : v;
     onAddFeedEvent({
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       t: now,
@@ -34,7 +37,7 @@ export const AskBar: React.FC<AskBarProps> = ({ curSymbol, onAddFeedEvent }) => 
       k: "QUESTION",
       c: "you",
       u: 0,
-      p: v,
+      p: echo,
     });
 
     try {
