@@ -112,9 +112,13 @@ function formatInline(text: string): string {
  * without touching already tagged HTML numbers.
  */
 function wrapNumbers(text: string): string {
-  // If the text has HTML tags, we should avoid matching inside tags like <span class="...">
-  return text.replace(/(<[^>]+>)|((?:\+|-)?\b\d{1,3}(?:,\d{3})*(?:\.\d+)?%?\b(?:\s*(?:fils|fil|KD|shares|minutes|min|seconds|sec|trades|observations|snaps|x|×))?)/gi, (match, tag, num) => {
-    if (tag) return tag;
+  // Skip HTML tags (e.g. <span class="...">) AND HTML entities (&#39; &amp; &#x27;).
+  // escapeHtml() runs first and turns ' into &#39;; without the entity branch this
+  // regex matched the "39" inside &#39;, injected a <span> into the middle of the
+  // entity and broke it, so the feed showed a literal "&#39;" instead of an
+  // apostrophe (SPR-17).
+  return text.replace(/(<[^>]+>|&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);)|((?:\+|-)?\b\d{1,3}(?:,\d{3})*(?:\.\d+)?%?\b(?:\s*(?:fils|fil|KD|shares|minutes|min|seconds|sec|trades|observations|snaps|x|×))?)/gi, (match, tagOrEntity, num) => {
+    if (tagOrEntity) return tagOrEntity;
     if (num) {
       return `<span class="mono-num">${num}</span>`;
     }
