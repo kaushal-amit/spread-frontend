@@ -25,52 +25,77 @@ export function getSocket(): Socket {
 
 export interface Live<T> { data: T | null; error: ApiError | Error | null; loading: boolean; at: number | null; refresh: () => void }
 
-/** Poll a GET on an interval, and again whenever `signal` changes. */
+/**
+ * Poll a GET on an interval, and again (debounced) whenever `signal` changes.
+ *
+ * Correctness under real conditions is the point here, not just "fetch on a
+ * timer". Three hazards a naive version has, and how this avoids them:
+ *
+ *  · Out-of-order responses. When the inputs change (a symbol switch, a date
+ *    pick) the old request can still be in flight and resolve LAST, overwriting
+ *    the new resource's data with the old one's. Every request is tagged to a
+ *    `gen`; a response from a superseded generation is dropped, and the request
+ *    is aborted on cleanup — latest always wins.
+ *  · A hung request. A backend that accepts the connection but never answers
+ *    would leave a fixed-interval poll stalled forever. The poll self-schedules
+ *    (next run only after this one settles) and every request carries a timeout,
+ *    so a stall becomes a reported error and the loop keeps going.
+ *  · Hammering + duplicates. Consecutive failures back off (everyMs → 2×→4×→8×,
+ *    capped, snapping back on success), the signal-driven refetch is debounced,
+ *    and a new request aborts any in-flight one — at most one request per hook
+ *    is ever open.
+ */
 function usePolled<T>(path: string, everyMs: number, signal: unknown = null, params?: Record<string, string | number | undefined>, enabled = true): Live<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | Error | null>(null);
   const [loading, setLoading] = useState(true);
   const [at, setAt] = useState<number | null>(null);
-  const alive = useRef(true);
   const key = JSON.stringify(params ?? {});
-
+  const gen = useRef(0);                              // bumped on every param change / unmount
+  const inflight = useRef<AbortController | null>(null);
   const fails = useRef(0);
 
   const refresh = useCallback((): Promise<void> => {
     if (!enabled) { setData(null); setLoading(false); return Promise.resolve(); }
-    return apiGet<T>(path, params)
-      .then((d) => { if (!alive.current) return; setData(d); setError(null); setAt(Date.now()); fails.current = 0; })
-      .catch((e) => { if (!alive.current) return; setError(e); fails.current = Math.min(fails.current + 1, 6); })
-      .finally(() => { if (alive.current) setLoading(false); });
+    inflight.current?.abort();                        // dedup: one request per hook
+    const ctrl = new AbortController();
+    inflight.current = ctrl;
+    const myGen = gen.current;
+    return apiGet<T>(path, params, { signal: ctrl.signal })
+      .then((d) => { if (gen.current !== myGen) return; setData(d); setError(null); setAt(Date.now()); fails.current = 0; })
+      .catch((e) => { if (e?.name === "AbortError" || gen.current !== myGen) return; setError(e); fails.current = Math.min(fails.current + 1, 6); })
+      .finally(() => { if (gen.current === myGen) setLoading(false); if (inflight.current === ctrl) inflight.current = null; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key, enabled]);
 
-  // D6 · self-scheduling poll with exponential backoff. A fixed setInterval keeps
-  // hammering a backend that is returning 500s at the same cadence; here a run
-  // only schedules the next AFTER it settles, and consecutive failures widen the
-  // gap (everyMs → 2× → 4× → 8×, capped), snapping back to everyMs on the first
-  // success. The self-scheduling timeout is what lets the delay change per run.
+  // The resource identity is (path, params, enabled) — captured in `refresh`. When
+  // it changes, this effect re-runs: bump the generation (so stale in-flight
+  // responses are dropped), clear the previous resource's data, show loading, and
+  // start a fresh self-scheduling poll with backoff.
   useEffect(() => {
-    alive.current = true;
+    gen.current += 1;
+    const myGen = gen.current;
+    setData(null);
+    setLoading(true);
+    fails.current = 0;
     let timer: ReturnType<typeof setTimeout>;
-    const tick = () => {
+    const run = () => {
       refresh().finally(() => {
-        if (!alive.current) return;
-        const delay = everyMs * Math.pow(2, Math.min(fails.current, 3));
-        timer = setTimeout(tick, delay);
+        if (gen.current !== myGen) return;
+        timer = setTimeout(run, everyMs * Math.pow(2, Math.min(fails.current, 3)));
       });
     };
-    tick();
-    return () => { alive.current = false; clearTimeout(timer); };
+    run();
+    return () => { gen.current += 1; clearTimeout(timer); inflight.current?.abort(); inflight.current = null; };
   }, [refresh, everyMs]);
 
-  // D6 · coalesce signal-driven refetches. board.tick fires on every push (~1/s
-  // in an active market); a refetch per tick multiplied REST load several-fold
-  // exactly when the backend was busiest. Debounce to ONE refetch shortly after
-  // the last tick, so a burst of updates costs one request, not one per update.
+  // Coalesce signal-driven refetches. board.tick fires on every push (~1/s in an
+  // active market); a refetch per tick multiplied REST load several-fold exactly
+  // when the backend was busiest. Debounce to ONE refetch shortly after the last
+  // tick — this is a background refresh, so it does NOT clear data or show loading.
   useEffect(() => {
     if (signal == null) return;
-    const t = setTimeout(() => { if (alive.current) refresh(); }, 1200);
+    const t = setTimeout(() => { refresh(); }, 1200);
     return () => clearTimeout(t);
   }, [signal, refresh]);
 
@@ -106,10 +131,23 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number; di
     };
   };
 
+  // Once the socket has delivered a board it is the authoritative source — the
+  // REST seed carries no counts/reach/stops and must never overwrite it (doing so
+  // blanked the session-banner STOP line after a trade, when board.refresh() was
+  // called while the socket was live). The seed exists only for the first paint
+  // and as the fallback when the push channel is down.
+  const socketSeeded = useRef(false);
+  const seedCtrl = useRef<AbortController | null>(null);
+
   const refresh = useCallback(() => {
+    if (socketSeeded.current) return;                 // socket is live — it owns the board
+    seedCtrl.current?.abort();
+    const ctrl = new AbortController();
+    seedCtrl.current = ctrl;
     // REST seed: /stocks is every symbol; split by status.
-    apiGet<StockCandidate[]>("/stocks")
+    apiGet<StockCandidate[]>("/stocks", undefined, { signal: ctrl.signal })
       .then((rows) => {
+        if (socketSeeded.current) return;             // a push landed while we were fetching
         setData({
           recommended: rows.filter((r) => r.status === "recommended"),
           nearMiss: rows.filter((r) => r.status === "near_miss"),
@@ -119,27 +157,39 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number; di
         });
         setError(null); setAt(Date.now());
       })
-      .catch(setError)
-      .finally(() => setLoading(false));
+      .catch((e) => { if (e?.name !== "AbortError") setError(e); })
+      .finally(() => { setLoading(false); if (seedCtrl.current === ctrl) seedCtrl.current = null; });
   }, []);
 
   useEffect(() => {
     refresh();
     const s = getSocket();
-    const onUpdate = (u: BoardUpdate) => { setData(fromUpdate(u)); setError(null); setAt(Date.now()); setLoading(false); setTick((t) => t + 1); };
+    const onUpdate = (u: BoardUpdate) => { socketSeeded.current = true; setData(fromUpdate(u)); setError(null); setAt(Date.now()); setLoading(false); setTick((t) => t + 1); };
     const onErr = (e: any) => setError(new ApiError(0, e?.data?.code || "SOCKET", e?.message || "socket error"));
     const onConnect = () => { setConnected(true); setDisconnectedSince(null); };
-    const onDisconnect = () => { setConnected(false); setDisconnectedSince((prev) => prev ?? Date.now()); };
+    const onDisconnect = () => {
+      // The push channel dropped; the socket no longer owns the board, so the REST
+      // seed is allowed to fill the gap again until the socket re-delivers.
+      socketSeeded.current = false;
+      setConnected(false); setDisconnectedSince((prev) => prev ?? Date.now());
+    };
+    const onSpreadErr = (e: any) => setError(new ApiError(400, e.code, e.error));
     s.on("connect", onConnect);
     s.on("disconnect", onDisconnect);
     s.on("connect_error", onErr);
     s.on("spread:update", onUpdate);
-    s.on("spread:error", (e: any) => setError(new ApiError(400, e.code, e.error)));
+    s.on("spread:error", onSpreadErr);
     if (s.connected) setConnected(true);
     // Not connected on mount and not yet dropped-from-connected: still mark a
     // start time so a channel that never attaches is visible, not silent.
     else setDisconnectedSince((prev) => prev ?? Date.now());
-    return () => { s.off("connect", onConnect); s.off("disconnect", onDisconnect); s.off("spread:update", onUpdate); s.off("connect_error", onErr); };
+    return () => {
+      // Remove EVERY listener this effect added — the spread:error handler used to
+      // leak (added, never removed), stacking a new one on each re-run.
+      s.off("connect", onConnect); s.off("disconnect", onDisconnect); s.off("connect_error", onErr);
+      s.off("spread:update", onUpdate); s.off("spread:error", onSpreadErr);
+      seedCtrl.current?.abort(); seedCtrl.current = null;
+    };
   }, [refresh]);
 
   return { data, error, loading, at, refresh, connected, tick, disconnectedSince };

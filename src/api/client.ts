@@ -60,17 +60,53 @@ async function parse<T>(r: Response): Promise<T> {
   return body as T;
 }
 
-export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+/**
+ * Per-request controls. `signal` lets a caller (a hook effect) cancel a request
+ * on unmount or when its inputs change — without it, a slow response resolves
+ * after a newer one and overwrites fresh state (an out-of-order race). `timeoutMs`
+ * bounds a hung connection: a backend that accepts the socket but never answers
+ * would otherwise leave the request pending forever, stalling a poll loop or
+ * locking a form. Both default sensibly; callers rarely pass either.
+ */
+export interface ReqOpts { signal?: AbortSignal; timeoutMs?: number; }
+export const DEFAULT_TIMEOUT_MS = 12000;
+
+async function doFetch(url: string, init: RequestInit, opts?: ReqOpts): Promise<Response> {
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const to = setTimeout(() => { timedOut = true; ctrl.abort(); }, opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  // Fold an external abort (a hook cleaning up, or its params changing) into the
+  // request's own controller, so cancellation works whichever side triggers it.
+  const ext = opts?.signal;
+  const onExtAbort = () => ctrl.abort();
+  if (ext) { if (ext.aborted) ctrl.abort(); else ext.addEventListener('abort', onExtAbort, { once: true }); }
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (e: any) {
+    // A timeout is a real, reportable error; an external cancel is not (the
+    // caller no longer wants the answer) and is re-thrown as an AbortError for
+    // the hook to ignore; anything else is a network failure, reported without
+    // leaking the raw fetch message.
+    if (timedOut) throw new ApiError(408, 'TIMEOUT', 'the request timed out');
+    if (e?.name === 'AbortError') throw e;
+    throw new ApiError(0, 'NETWORK', 'could not reach the server');
+  } finally {
+    clearTimeout(to);
+    if (ext) ext.removeEventListener('abort', onExtAbort);
+  }
+}
+
+export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: ReqOpts): Promise<T> {
   const qs = params
     ? '?' + Object.entries(params).filter(([, v]) => v != null && v !== '')
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
     : '';
-  const r = await fetch(`${API_BASE}/api${path}${qs.length > 1 ? qs : ''}`, { headers: headers() });
+  const r = await doFetch(`${API_BASE}/api${path}${qs.length > 1 ? qs : ''}`, { headers: headers() }, opts);
   return parse<T>(r);
 }
 
-export async function apiPost<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'DELETE' = 'POST'): Promise<T> {
-  const r = await fetch(`${API_BASE}/api${path}`, { method, headers: headers(true), body: JSON.stringify(body ?? {}) });
+export async function apiPost<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'DELETE' = 'POST', opts?: ReqOpts): Promise<T> {
+  const r = await doFetch(`${API_BASE}/api${path}`, { method, headers: headers(true), body: JSON.stringify(body ?? {}) }, opts);
   return parse<T>(r);
 }
 
