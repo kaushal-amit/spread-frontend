@@ -18,6 +18,30 @@ export class ApiError extends Error {
 export const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '';
 export const API_TOKEN: string | null = (import.meta.env.VITE_SPREAD_API_TOKEN as string | undefined) || null;
 
+/**
+ * The scraper owns /ingest (capture config + the depth slots); the backend owns
+ * /api. In dev, Vite proxies both, so INGEST_BASE is blank. In a static build
+ * there is no proxy — /ingest must be pointed at the scraper's origin, or the
+ * request hits the SPA host (Firebase), gets index.html back with a 200, and the
+ * "book" reads as a null response. Defaults to VITE_INGEST_BASE, then API_BASE
+ * (when the backend reverse-proxies /ingest), then same-origin.
+ */
+export const INGEST_BASE: string =
+  (import.meta.env.VITE_INGEST_BASE as string | undefined)?.replace(/\/$/, '') ?? API_BASE;
+
+/**
+ * D2 · fail LOUD when a production build has no backend base. The silent
+ * same-origin fallback is what shipped the wss://kse-spread socket bug and the
+ * whole-board 404s: a static build MUST be told where the backend is. Surfaced
+ * to the console at load and via `configError` so the app can show a banner
+ * instead of silently calling its own origin.
+ */
+export const configError: string | null =
+  import.meta.env.PROD && !API_BASE
+    ? 'VITE_API_BASE is not set — this build has no backend URL and is calling its own origin. Rebuild with VITE_API_BASE (and VITE_INGEST_BASE) pointed at the backend/scraper.'
+    : null;
+if (configError) console.error('[SPREAD config] ' + configError);
+
 function headers(json = false): Record<string, string> {
   const h: Record<string, string> = {};
   if (json) h['Content-Type'] = 'application/json';

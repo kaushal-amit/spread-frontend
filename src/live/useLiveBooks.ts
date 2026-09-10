@@ -39,7 +39,7 @@ export function useLiveBooks() {
   const reloadSlots = async () => {
     try {
       const r = await getSlots();
-      const list = r.symbols || [];
+      const list = r?.symbols || [];
       setSlots(list);
       watch(list.map((x) => x.symbol));
       setError(null);

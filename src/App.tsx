@@ -30,6 +30,7 @@ import "./live/books.css";
 import { FeedSection } from "./components/FeedSection";
 import { AskBar } from "./components/AskBar";
 import { useAccount, useAlerts, useBoard, useBudget, useContracts, useDetail, useMarket, useSession, useSessions, useReviewBoard, useFeeds, fetchFeedHistory, isSelectableSession } from "./api/hooks";
+import { configError } from "./api/client";
 import { Columns2, MessageSquare } from "lucide-react";
 
 type Tab = "TODAY" | "BOOKS" | "STATES" | { symbol: string };
@@ -51,6 +52,14 @@ const rvChg = (chg: number | null | undefined, close: number | null | undefined)
 export default function App() {
   // ── live state ──────────────────────────────────────────────────────────
   const board = useBoard();
+  // D5 · SPR-33 for the SILENT socket. socket.io reports `connected` even when the
+  // server has stopped emitting, so a hard-disconnect check alone leaves the page
+  // reading "live" on a frozen board. Tick a clock and treat a board older than
+  // FEED_STALE_MS as stale, whether or not the socket says it is connected.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(t); }, []);
+  const FEED_STALE_MS = 120000; // 120s — the same cue TodayView shows inline
+  const feedStale = board.at != null && now - board.at > FEED_STALE_MS;
   const account = useAccount(board.tick);
   const budgetLive = useBudget(board.tick);
   const session = useSession();
@@ -224,15 +233,31 @@ export default function App() {
         onPick={pickTab} onClose={() => setTab("TODAY")} onPopGo={handlePopGo}
       />
 
+      {/* D2 · a production build with no VITE_API_BASE calls its own origin and
+          silently reads nothing. Say so, loudly and persistently, rather than
+          leaving the operator to wonder why every panel is empty. */}
+      {configError && (
+        <div className="session-banner session-danger" id="config-banner" role="alert">
+          <span className="session-banner-pip" />
+          <span className="session-banner-title">MISCONFIGURED BUILD</span>
+          <span className="session-banner-why">{configError}</span>
+        </div>
+      )}
+
       {/* SPR-33 · a dropped push channel is SHOWN, not left reading "live" on
-          stale data. Appears once the board has loaded at least once and the
-          socket is not connected; socket.io reconnects underneath. */}
-      {!board.connected && board.at != null && (
+          stale data. Fires on a hard disconnect OR (D5) when the socket is
+          connected but the board has not updated in FEED_STALE_MS — a silent
+          feed is just as stale as a dropped one. socket.io reconnects underneath. */}
+      {board.at != null && (!board.connected || feedStale) && (
         <div className="session-banner session-danger" id="conn-banner" role="status">
           <span className="session-banner-pip" />
-          <span className="session-banner-title">LIVE FEED LOST — reconnecting…</span>
+          <span className="session-banner-title">
+            {board.connected ? "FEED STALLED — no update" : "LIVE FEED LOST — reconnecting…"}
+          </span>
           <span className="session-banner-why">
-            {board.disconnectedSince ? `since ${kuwaitHHMM(board.disconnectedSince)} Kuwait · ` : ""}showing the last update, not live
+            {board.connected
+              ? `no update in ${Math.round((now - board.at) / 1000)}s — showing the last, not live`
+              : (board.disconnectedSince ? `since ${kuwaitHHMM(board.disconnectedSince)} Kuwait · ` : "") + "showing the last update, not live"}
           </span>
         </div>
       )}

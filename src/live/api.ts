@@ -17,7 +17,7 @@ export interface Book {
 }
 export interface Slot { slot: number; symbol: string; code: string | null; }
 
-import { apiGet, API_TOKEN } from "../api/client";
+import { apiGet, API_TOKEN, INGEST_BASE } from "../api/client";
 import type { StockCandidate, TradingContract } from "../api/types";
 
 /**
@@ -39,13 +39,20 @@ const json = async (r: Response) => {
     if (plain) throw new Error(String(plain));
     throw new Error(`${r.status} ${r.statusText || ""}`.trim() + (snippet ? ` — ${snippet}` : ""));
   }
+  // A 200 with a body that is NOT JSON is a misroute, not an empty book: the SPA
+  // host answered /ingest with its index.html. Returning null here let a consumer
+  // read `.symbols` off null ("Cannot read properties of null"). Surface it as a
+  // diagnostic instead of a silent null. (A genuine empty 204 stays null.)
+  if (body === null && text && text.trim()) {
+    throw new Error("the scraper returned a non-JSON response — /ingest is not routed to the scraper (set VITE_INGEST_BASE)");
+  }
   return body;
 };
 const scraperHeaders = (): Record<string, string> => (API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {});
 
 /** The five symbols currently swept. Served by the SCRAPER — capture config. */
 export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string }> =>
-  fetch("/ingest/depth-symbols", { headers: scraperHeaders() }).then(json);
+  fetch(`${INGEST_BASE}/ingest/depth-symbols`, { headers: scraperHeaders() }).then(json);
 
 /**
  * Swap a slot. Takes effect within 25 seconds — the sweep re-reads the list
@@ -55,7 +62,7 @@ export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string }> =
  * names which, and that text is shown to the trader rather than a generic one.
  */
 export const swapSlot = (slot: number, symbol: string, reason?: string) =>
-  fetch(`/ingest/slots/${slot}`, {
+  fetch(`${INGEST_BASE}/ingest/slots/${slot}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...scraperHeaders() },
     body: JSON.stringify({ symbol, reason }),

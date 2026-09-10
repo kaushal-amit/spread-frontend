@@ -34,23 +34,45 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
   const alive = useRef(true);
   const key = JSON.stringify(params ?? {});
 
-  const refresh = useCallback(() => {
-    if (!enabled) { setData(null); setLoading(false); return; }
-    apiGet<T>(path, params)
-      .then((d) => { if (!alive.current) return; setData(d); setError(null); setAt(Date.now()); })
-      .catch((e) => { if (!alive.current) return; setError(e); })
+  const fails = useRef(0);
+
+  const refresh = useCallback((): Promise<void> => {
+    if (!enabled) { setData(null); setLoading(false); return Promise.resolve(); }
+    return apiGet<T>(path, params)
+      .then((d) => { if (!alive.current) return; setData(d); setError(null); setAt(Date.now()); fails.current = 0; })
+      .catch((e) => { if (!alive.current) return; setError(e); fails.current = Math.min(fails.current + 1, 6); })
       .finally(() => { if (alive.current) setLoading(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key, enabled]);
 
+  // D6 · self-scheduling poll with exponential backoff. A fixed setInterval keeps
+  // hammering a backend that is returning 500s at the same cadence; here a run
+  // only schedules the next AFTER it settles, and consecutive failures widen the
+  // gap (everyMs → 2× → 4× → 8×, capped), snapping back to everyMs on the first
+  // success. The self-scheduling timeout is what lets the delay change per run.
   useEffect(() => {
     alive.current = true;
-    refresh();
-    const t = setInterval(refresh, everyMs);
-    return () => { alive.current = false; clearInterval(t); };
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      refresh().finally(() => {
+        if (!alive.current) return;
+        const delay = everyMs * Math.pow(2, Math.min(fails.current, 3));
+        timer = setTimeout(tick, delay);
+      });
+    };
+    tick();
+    return () => { alive.current = false; clearTimeout(timer); };
   }, [refresh, everyMs]);
 
-  useEffect(() => { if (signal != null) refresh(); }, [signal, refresh]);
+  // D6 · coalesce signal-driven refetches. board.tick fires on every push (~1/s
+  // in an active market); a refetch per tick multiplied REST load several-fold
+  // exactly when the backend was busiest. Debounce to ONE refetch shortly after
+  // the last tick, so a burst of updates costs one request, not one per update.
+  useEffect(() => {
+    if (signal == null) return;
+    const t = setTimeout(() => { if (alive.current) refresh(); }, 1200);
+    return () => clearTimeout(t);
+  }, [signal, refresh]);
 
   return { data, error, loading, at, refresh };
 }
