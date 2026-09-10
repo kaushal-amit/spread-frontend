@@ -334,8 +334,12 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
               <div className="gates">
                 {c.gateGroups.flatMap((g) => g.cells).map((cell) => (
                   <span key={cell.label} className={`g ${cell.ok ? (cell.warn ? "mid" : "ok") : "no"}`}
-                    title={`${cell.label}${cell.sub ? " · " + cell.sub : ""}`}>
+                    title={`${cell.label}${cell.check ? " · " + cell.check.text : cell.sub ? " · " + cell.sub : ""}`}>
                     {cell.label.toLowerCase()} {cell.value}{cell.sub ? <small> {cell.sub}</small> : null}
+                    {/* CR-7 · the server's "value vs threshold — PASS/FAIL",
+                        printed verbatim — the browser shows the verdict, never
+                        computes it (it has neither the threshold nor the cmp). */}
+                    {cell.check ? <small className="chk"> · {cell.check.text}</small> : null}
                   </span>
                 ))}
                 {c.metrics.tapeQualityUpPct != null && (

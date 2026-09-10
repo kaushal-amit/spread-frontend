@@ -69,7 +69,11 @@ async function parse<T>(r: Response): Promise<T> {
  * locking a form. Both default sensibly; callers rarely pass either.
  */
 export interface ReqOpts { signal?: AbortSignal; timeoutMs?: number; }
-export const DEFAULT_TIMEOUT_MS = 12000;
+// Per-endpoint timeouts live in ONE config module (config/endpoints.ts), not as
+// a literal here. DEFAULT_TIMEOUT_MS stays exported for callers that want the
+// baseline explicitly; apiGet/apiPost resolve the per-path value from it.
+import { timeoutFor, TIMEOUT_MS } from '../config/endpoints';
+export const DEFAULT_TIMEOUT_MS = TIMEOUT_MS.default;
 
 async function doFetch(url: string, init: RequestInit, opts?: ReqOpts): Promise<Response> {
   const ctrl = new AbortController();
@@ -101,12 +105,14 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
     ? '?' + Object.entries(params).filter(([, v]) => v != null && v !== '')
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
     : '';
-  const r = await doFetch(`${API_BASE}/api${path}${qs.length > 1 ? qs : ''}`, { headers: headers() }, opts);
+  const o = { ...opts, timeoutMs: opts?.timeoutMs ?? timeoutFor(path) };
+  const r = await doFetch(`${API_BASE}/api${path}${qs.length > 1 ? qs : ''}`, { headers: headers() }, o);
   return parse<T>(r);
 }
 
 export async function apiPost<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'DELETE' = 'POST', opts?: ReqOpts): Promise<T> {
-  const r = await doFetch(`${API_BASE}/api${path}`, { method, headers: headers(true), body: JSON.stringify(body ?? {}) }, opts);
+  const o = { ...opts, timeoutMs: opts?.timeoutMs ?? timeoutFor(path) };
+  const r = await doFetch(`${API_BASE}/api${path}`, { method, headers: headers(true), body: JSON.stringify(body ?? {}) }, o);
   return parse<T>(r);
 }
 

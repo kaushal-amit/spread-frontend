@@ -6,7 +6,19 @@
  * mismatched name is a silent `undefined` rather than an error — which is how
  * BooksView read `.open` from a bare array for a month.
  */
-export interface GateCell { label: string; ok: boolean; warn: boolean; value: string; sub: string; rawNumber?: number }
+/**
+ * CR-7 · the server-formatted verdict for a gate cell: "<value> <cmp>
+ * <threshold> — PASS/FAIL/WARN", decided by the funnel where the threshold and
+ * the comparator live. The browser PRINTS `text`; it never re-derives the
+ * verdict (it has neither the threshold nor the comparator). `computed:false`
+ * means the gate failed for want of a number — shown as NOT COMPUTED, not FAIL.
+ */
+export interface GateCheck {
+  text: string; verdict: 'PASS' | 'FAIL' | 'WARN' | 'NOT_COMPUTED';
+  ok: boolean; warn: boolean; computed: boolean;
+  actual: string | null; cmp: string; threshold: string;
+}
+export interface GateCell { label: string; ok: boolean; warn: boolean; value: string; sub: string; rawNumber?: number; check?: GateCheck | null }
 export interface GateGroup { groupName: string; cells: GateCell[] }
 export interface BehaviourFlag { flag: string; icon: string; label: string; why: string }
 

@@ -17,6 +17,8 @@ import type { StockCandidate, TradingContract, MarketDay, Budget } from "../api/
 import type { Board, Live } from "../api/hooks";
 import { fmt } from "../utils/format";
 import { kuwaitHHMM, ageSec, ageLabel } from "../lib/time";
+import { BOARD_STALE_MS } from "../config/endpoints";
+import { SCREENER_FILTERS, screenerLabel, applyScreener, screenerColumns, type ScreenerKey } from "../lib/screener";
 
 interface Props {
   board: Board | null;
@@ -52,11 +54,15 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   const contracts = contractsLive.data;
   const R = regime(M);
 
+  // C1 · the seven screener filters. Pure client-side predicates over fields the
+  // payload already carries; ALL is the default and leaves the board untouched.
+  const [filter, setFilter] = React.useState<ScreenerKey>("ALL");
+
   const open = (contracts || []).filter((c) => c.state !== "picked");
   const picked = (contracts || []).filter((c) => c.state === "picked");
   // The board is STALE when the socket is down or the last update is old.
   const boardAge = ageSec(boardAt);
-  const boardStale = !!board && (!connected || (boardAge != null && boardAge > 120));
+  const boardStale = !!board && (!connected || (boardAge != null && boardAge > BOARD_STALE_MS / 1000));
   const openSyms = new Set(open.map((c) => c.symbol));
 
   // SPR-39 · the change is stored as a float; round it to the tick on the card
@@ -69,6 +75,15 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   const rej = board?.rejected ?? [];
   const all = board?.all ?? [];
   const notComputed = all.filter((s) => s.notComputed?.length);
+  // C1 · apply the active screener predicate to each bucket for RENDERING. The
+  // top state line keeps the true totals; the sections below show the filtered
+  // slices so ALL is the board unchanged and any other chip narrows it.
+  const recF = applyScreener(rec, filter);
+  const nearF = applyScreener(near, filter);
+  const rejF = applyScreener(rej, filter);
+  const ncF = applyScreener(notComputed, filter);
+  const filterActive = filter !== "ALL";
+  const matched = filterActive ? applyScreener(all, filter).length : all.length;
   // R-38 · the two causes come from the server (screening counts), not the browser.
   const noQuotes = board?.counts?.noQuotes ?? 0;
   const noStats = board?.counts?.noStats ?? 0;
@@ -102,6 +117,14 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         {cls === "go" && <span className="rg">{fmt(s.shares)} sh · net {kd(s.netKd)}{m45Tag(s)}</span>}
         {cls !== "go" && s.behaviourFlags?.length ? <span className="rg">{s.behaviourFlags.map((b) => b.label).join(" · ")}{m45Tag(s)}</span> : null}
         {cls !== "go" && !s.behaviourFlags?.length && s.metrics.m45 != null ? <span className="rg">{m45Tag(s)}</span> : null}
+        {/* C2 · the screener row's columns, from metrics/headroom already on the
+            candidate — price, tick, 1d, tiny, mv, up2, vol×, post%, exit%,
+            net/fil, reach×. Nothing re-derived; the server decided each. */}
+        <span className="mx">
+          {screenerColumns(s).map((col) => (
+            <em key={col.k} className="mxc"><i>{col.k}</i> {col.v}</em>
+          ))}
+        </span>
       </div>
     );
   };
@@ -179,6 +202,22 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         </p>
       )}
 
+      {/* C1 · the seven screener filters — pure client-side predicates over the
+          fields the payload already carries. ALL leaves the board untouched. */}
+      {board && (
+        <div className="scrn" id="screener-filters" role="group" aria-label="screener filters">
+          {SCREENER_FILTERS.map((def) => (
+            <button key={def.key} type="button" id={`screener-${def.key}`}
+              className={`chip ${filter === def.key ? "on" : ""}`}
+              aria-pressed={filter === def.key}
+              onClick={() => setFilter(def.key)}>
+              {screenerLabel(def, board.budgetKd)}
+            </button>
+          ))}
+          {filterActive && <span className="scrn-n">{matched} of {all.length}</span>}
+        </div>
+      )}
+
       {/* ── sections ── */}
       {(open.length > 0 || picked.length > 0) && (
         <div className="plgrp">
@@ -194,36 +233,36 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
       )}
 
       <div className="plgrp">
-        <span className="plk">WORTH TAKING</span>
-        {rec.filter((s) => !openSyms.has(s.symbol)).length
-          ? rec.filter((s) => !openSyms.has(s.symbol)).map((s) => card(s, "go"))
-          : <div className="pl none">{board ? "Nothing on the board passes every gate right now." : "—"}</div>}
+        <span className="plk">WORTH TAKING{filterActive ? ` · ${screenerLabel(SCREENER_FILTERS.find((f) => f.key === filter)!, board?.budgetKd ?? null)}` : ""}</span>
+        {recF.filter((s) => !openSyms.has(s.symbol)).length
+          ? recF.filter((s) => !openSyms.has(s.symbol)).map((s) => card(s, "go"))
+          : <div className="pl none">{board ? (filterActive ? "None of the recommended pass this filter." : "Nothing on the board passes every gate right now.") : "—"}</div>}
       </div>
 
-      {near.length > 0 && (
+      {nearF.length > 0 && (
         <div className="plgrp">
           <span className="plk">ONE GATE AWAY</span>
-          {near.slice(0, 12).map((s) => card(s, "near"))}
-          {near.length > 12 && <div className="pl none">and {near.length - 12} more</div>}
+          {nearF.slice(0, 12).map((s) => card(s, "near"))}
+          {nearF.length > 12 && <div className="pl none">and {nearF.length - 12} more</div>}
         </div>
       )}
 
-      {rej.length > 0 && (
+      {rejF.length > 0 && (
         <div className="plgrp">
-          <span className="plk">LEAVE ALONE · {rej.length}</span>
-          {rej.slice(0, 6).map((s) => card(s, "no"))}
-          {rej.length > 6 && <div className="pl none">and {rej.length - 6} more — sorted by what they would have paid</div>}
+          <span className="plk">LEAVE ALONE · {rejF.length}</span>
+          {rejF.slice(0, 6).map((s) => card(s, "no"))}
+          {rejF.length > 6 && <div className="pl none">and {rejF.length - 6} more — sorted by what they would have paid</div>}
         </div>
       )}
 
       {/* SPR-38 · the third bucket. These are not rejected — a gate could not be
           computed for want of a number. Shown apart so the board never reads
           "140 rejected" over cards that never failed a stock. */}
-      {notComputed.length > 0 && (
+      {ncF.length > 0 && (
         <div className="plgrp">
-          <span className="plk">NOT COMPUTED · {notComputed.length}</span>
-          {notComputed.slice(0, 6).map((s) => card(s, "no"))}
-          {notComputed.length > 6 && <div className="pl none">and {notComputed.length - 6} more — a statistic is missing, not a failed stock</div>}
+          <span className="plk">NOT COMPUTED · {ncF.length}</span>
+          {ncF.slice(0, 6).map((s) => card(s, "no"))}
+          {ncF.length > 6 && <div className="pl none">and {ncF.length - 6} more — a statistic is missing, not a failed stock</div>}
         </div>
       )}
 

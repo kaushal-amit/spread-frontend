@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { apiGet, ApiError, socketOptions, socketUrl } from "./client";
+import { POLL_MS, BACKOFF, DEBOUNCE_MS } from "../config/endpoints";
 import type { AccountState, BoardUpdate, Budget, MarketDay, SessionInfo, StockCandidate, TradingContract, Detail, AlertMsg, EntryAlertMsg, StrandedMsg, WakeupMsg, HaltMsg, SlotStaleMsg, FeedServerEvent, FeedHealth } from "./types";
 import { kuwaitHHMM } from "../lib/time";
 import { requestNotifyOnce, pushNotification, beep } from "../lib/notify";
@@ -63,7 +64,7 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
     const myGen = gen.current;
     return apiGet<T>(path, params, { signal: ctrl.signal })
       .then((d) => { if (gen.current !== myGen) return; setData(d); setError(null); setAt(Date.now()); fails.current = 0; })
-      .catch((e) => { if (e?.name === "AbortError" || gen.current !== myGen) return; setError(e); fails.current = Math.min(fails.current + 1, 6); })
+      .catch((e) => { if (e?.name === "AbortError" || gen.current !== myGen) return; setError(e); fails.current = Math.min(fails.current + 1, BACKOFF.maxFails); })
       .finally(() => { if (gen.current === myGen) setLoading(false); if (inflight.current === ctrl) inflight.current = null; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key, enabled]);
@@ -82,7 +83,7 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
     const run = () => {
       refresh().finally(() => {
         if (gen.current !== myGen) return;
-        timer = setTimeout(run, everyMs * Math.pow(2, Math.min(fails.current, 3)));
+        timer = setTimeout(run, everyMs * Math.pow(BACKOFF.factor, Math.min(fails.current, BACKOFF.maxDoublings)));
       });
     };
     run();
@@ -95,7 +96,7 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
   // tick — this is a background refresh, so it does NOT clear data or show loading.
   useEffect(() => {
     if (signal == null) return;
-    const t = setTimeout(() => { refresh(); }, 1200);
+    const t = setTimeout(() => { refresh(); }, DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [signal, refresh]);
 
@@ -195,9 +196,9 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number; di
   return { data, error, loading, at, refresh, connected, tick, disconnectedSince };
 }
 
-export const useAccount = (signal?: unknown) => usePolled<AccountState>("/account", 15000, signal);
-export const useBudget = (signal?: unknown) => usePolled<Budget>("/budget", 15000, signal);
-export const useSession = () => usePolled<SessionInfo>("/session", 30000);
+export const useAccount = (signal?: unknown) => usePolled<AccountState>("/account", POLL_MS.account, signal);
+export const useBudget = (signal?: unknown) => usePolled<Budget>("/budget", POLL_MS.budget, signal);
+export const useSession = () => usePolled<SessionInfo>("/session", POLL_MS.session);
 
 // ─── R-18 · the session picker and review data ──────────────────────────────
 export interface SessionRow {
@@ -210,22 +211,22 @@ export interface ReviewSymbol {
   total_volume: number | null; trades: number | null; data_quality: string | null;
 }
 /** The days that traded and may be selected. Rarely changes — poll slowly. */
-export const useSessions = () => usePolled<{ sessions: SessionRow[]; truncated_before_hhmm: number }>("/sessions", 600000);
+export const useSessions = () => usePolled<{ sessions: SessionRow[]; truncated_before_hhmm: number }>("/sessions", POLL_MS.sessions);
 /** The raw symbol_day board for a past session (read-only review). */
 export const useReviewBoard = (date: string | null, enabled: boolean) =>
   usePolled<{ date: string; count: number; symbols: ReviewSymbol[] }>(
-    `/review/session/${date ?? ""}/symbols`, 600000, null, undefined, enabled && !!date);
+    `/review/session/${date ?? ""}/symbols`, POLL_MS.review, null, undefined, enabled && !!date);
 /** R-18 · a date is selectable only if it is today or a day that traded. */
 export const isSelectableSession = (date: string, today: string | null, sessionDates: string[]): boolean =>
   date === today || new Set(sessionDates).has(date);
-export const useMarket = () => usePolled<MarketDay>("/market", 60000);
-export const useContracts = (signal?: unknown) => usePolled<TradingContract[]>("/trading/contracts", 10000, signal);
+export const useMarket = () => usePolled<MarketDay>("/market", POLL_MS.market);
+export const useContracts = (signal?: unknown) => usePolled<TradingContract[]>("/trading/contracts", POLL_MS.contracts, signal);
 
 // ─── SPR-30 · the capture-feed roster, so the header can be honest ──────────
 // Polls /feeds and also takes the live `spread:feedHealth` push, so a feed
 // going silent shows within the scan interval without waiting for the poll.
 export function useFeeds(): Live<FeedHealth> {
-  const base = usePolled<FeedHealth>("/feeds", 60000);
+  const base = usePolled<FeedHealth>("/feeds", POLL_MS.feeds);
   const [data, setData] = useState<FeedHealth | null>(null);
   useEffect(() => { setData(base.data); }, [base.data]);
   useEffect(() => {
@@ -259,7 +260,7 @@ export async function fetchFeedHistory(date?: string): Promise<Array<{ id: strin
  * symbols, so the hook watches on mount and unwatches on leave — C-06).
  */
 export function useDetail(symbol: string | null, tick: number): Live<Detail> & { bookAt: number | null } {
-  const base = usePolled<Detail>(`/stocks/${symbol || "_"}/detail`, 10000, symbol ? tick : null, undefined, !!symbol);
+  const base = usePolled<Detail>(`/stocks/${symbol || "_"}/detail`, POLL_MS.detail, symbol ? tick : null, undefined, !!symbol);
   const [data, setData] = useState<Detail | null>(null);
   // When the ladder was last patched by a push — the stale marker reads this.
   const [bookAt, setBookAt] = useState<number | null>(null);
