@@ -173,11 +173,13 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
       <span className="s">{c.symbol}</span>
       <span className="p">{c.entry ?? "—"}</span>
       <span className="w">
-        {c.state === "carried" ? "CARRIED" : "HOLDING"} · {fmt(c.shares)} @ {c.entry ?? "—"} · bid {c.bid == null ? "no quote today" : c.bid} ·{" "}
+        {/* F2 · STOP HIT leads; F1 · PART FILLED names the rest still queued. */}
+        {c.stopHitAt ? <b className="dn">STOP HIT · </b> : null}
+        {c.state === "carried" ? "CARRIED" : (c.restingBuyShares ?? 0) > 0 ? `PART FILLED (${fmt(c.restingBuyShares)} resting)` : "HOLDING"} · {fmt(c.shares)} @ {c.entry ?? "—"} · bid {c.bid == null ? "no quote today" : c.bid} ·{" "}
         {c.unrealisedKd == null ? "unrealised unknown" : `${kd(c.unrealisedKd)} KD`}
         {c.shares !== c.boughtShares ? ` · ${fmt(c.boughtShares - c.shares)} already sold` : ""}
       </span>
-      <span className="rg">break-even {c.breakEvenPrice ?? "—"} · target {c.targetNormal ?? "—"}/{c.targetTrending ?? "—"}{c.peakSinceFill != null ? ` · peak ${c.peakSinceFill}` : ""}</span>
+      <span className="rg">break-even {c.breakEvenPrice ?? "—"} · target {c.targetNormal ?? "—"}/{c.targetTrending ?? "—"}{c.stopFils != null ? ` · stop ${c.stopFils}` : ""}{c.peakSinceFill != null ? ` · peak ${c.peakSinceFill}` : ""}</span>
     </div>
   );
 
@@ -276,6 +278,14 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         {recF.filter((s) => !openSyms.has(s.symbol)).length
           ? recF.filter((s) => !openSyms.has(s.symbol)).map((s) => card(s, "go"))
           : <div className="pl none">{boardError ? "board unavailable — nothing was evaluated" : boardBroken ? "no symbols came back and no counts — this is a broken board, not a quiet one" : board ? (filterActive ? "None of the recommended pass this filter." : "Nothing on the board passes every gate right now.") : "—"}</div>}
+        {/* F7 · the fits line — the server's (snapshot budget.fits): the TAKE
+            cards against the free KD, greedy in board order. Absent until a
+            snapshot carried both the board and the budget. */}
+        {rec.length > 0 && budget?.fits && (
+          <div className="pl-summary" id="worth-taking-summary" title={budget.fits.items.map((i) => `${i.symbol}: ${i.computed ? `needs ${fmt(Math.round(i.needKd!))} KD${i.fits ? "" : ` — short ${fmt(Math.round(i.deficitKd!))}`}` : "minimum not computed"}`).join("\n")}>
+            {budget.fits.line}
+          </div>
+        )}
       </div>
 
       {nearF.length > 0 && (

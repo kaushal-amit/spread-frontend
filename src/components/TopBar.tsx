@@ -152,12 +152,15 @@ export const TopBar: React.FC<TopBarProps> = ({
     // afternoon drift-down is approaching (or here). Show the countdown from the
     // server's minutesToStepDown so it reads as "when", not "click me".
     const mins = session.minutesToStepDown;
+    // F5 · Trading at Last: not open (no new position), but an open position
+    // may still be closed at the auction price — the pill says so.
     modeText = session.phase === "pre_open" ? "PRE-OPEN" : session.phase === "closed" ? "CLOSED"
+      : session.phase === "tal" ? "TAL · close only"
       : session.phase === "step_down" ? (mins != null && mins > 0 ? `STEP-DOWN in ${mins}m` : "STEP-DOWN now")
       : session.phase === "peak" ? "PEAK" : "LIVE";
     // SPR-33 · "live" styling requires the push channel, not just an open
     // session — a dropped socket must not keep the pill lit green.
-    modeClass = session.open ? (connected ? "live" : "past") : session.phase === "pre_open" ? "plan" : "past";
+    modeClass = session.open ? (connected ? "live" : "past") : session.phase === "pre_open" || session.phase === "tal" ? "plan" : "past";
   }
   // The socket plan · the pill never reads LIVE on a dead or stale ticker, and
   // reads CLOSED after the final snapshot — the heartbeat decides, not the clock.

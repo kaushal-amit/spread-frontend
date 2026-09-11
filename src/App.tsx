@@ -333,12 +333,13 @@ export default function App() {
             )}
             <div id="panel">
               {tab === "BOOKS" ? <ErrorBoundary name="BOOKS"><BooksView writesBlocked={writesBlocked} /></ErrorBoundary>
-                : tab === "STATES" ? <ErrorBoundary name="STATES"><StatesView /></ErrorBoundary>
+                : tab === "STATES" ? <ErrorBoundary name="STATES"><StatesView contracts={contractsLive.data} board={board.data} session={session.data} stops={board.data?.stops ?? session.data?.stops ?? null} onPickSymbol={openSymbol} /></ErrorBoundary>
                 : curSymbol ? (
                   <ErrorBoundary name={curSymbol} onReset={detail.refresh}>
                     <StockDetail symbol={curSymbol} detail={detail.data} error={detail.error} loading={detail.loading}
                       detailAt={detail.at} bookAt={detail.bookAt} connected={board.connected && !live.dead}
                       stops={board.data?.stops ?? session.data?.stops ?? null} readOnly={reviewMode || writesBlocked}
+                      dayKd={account.data?.todayKd ?? null}
                       onChanged={onTradeChanged} onFeed={addFeed} />
                   </ErrorBoundary>
                 ) : reviewMode ? (

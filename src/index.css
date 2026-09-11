@@ -1313,6 +1313,10 @@ body {
 .lr.bad .bx i { background: var(--stop); }
 .lr.bad .mk { color: var(--stop); }
 
+.lr.act-stop { color: var(--stop); }
+.lr.act-stop .bx i { background: var(--stop); }
+.lr.act-stop .mk { color: var(--stop); }
+.lr.act-stop .note { color: var(--stop); font-weight: 700; }
 .lr.mine { color: var(--wait); }
 .lr.mine .bx i { background: var(--wait); }
 .lr.mine .mk { color: var(--wait); }

@@ -87,7 +87,10 @@ export interface StockCandidate {
 
 export interface Leg {
   id: number; contractId: number; symbol: string; time: string; side: 'BUY' | 'SELL';
-  status: string; price: number; shares: number; commission_kd: number; note: string;
+  status: string; price: number; shares: number; filledShares?: number | null; commission_kd: number; note: string;
+  // F1 · 'POSTED' = the rest of a partial fill is still queued (restingShares of it). null = whole / not tracked.
+  restStatus?: 'POSTED' | 'FILLED' | 'CANCELLED' | null; restingShares?: number;
+  isOverride?: boolean;
 }
 /**
  * A contract. Since Step 3.8 a number the server does not KNOW is null, never
@@ -104,7 +107,12 @@ export interface TradingContract {
   // R-41 · the exit target (FLOW step 7): +2 fils normally, +6 on a trending day. The trailing offer is gone.
   targetNormal: number | null; targetTrending: number | null; peakSinceFill: number | null;
   stepDownTime: string; boughtShares: number; openedOn: string | null;
-  markedAt: 'quote' | 'entry' | null; quoteAt: string | null; legs: Leg[];
+  markedAt: 'quote' | 'entry' | null; quoteAt: string | null;
+  // F2 · the stop RECORDED at the fill (fixed); stopHitAt once the bid printed through it.
+  stopFils?: number | null; stopHitAt?: string | null;
+  // F1 · PART FILLED: the buy's remainder still queued (0 when whole).
+  restingBuyShares?: number;
+  legs: Leg[];
 }
 
 export interface AccountState {
@@ -116,6 +124,8 @@ export interface AccountState {
 export interface Budget {
   budget_kd: number; reserve_kd: number; reserve_held: boolean; reserve_releases_at_hhmm: number;
   committed_kd: number; open_positions: number; free_kd: number; min_position_kd: number; max_price_fils: number;
+  // F7 · the snapshot's fits line: the TAKE cards against free_kd (sizing.fits). Absent on a REST /budget read.
+  fits?: { freeKd: number | null; remainingKd?: number; line: string; items: { symbol: string; needKd: number | null; computed: boolean; fits: boolean | null; deficitKd: number | null }[] };
 }
 
 /**
@@ -144,7 +154,10 @@ export interface SessionStops {
 }
 
 export interface SessionInfo {
-  phase: 'pre_open' | 'calm' | 'peak' | 'step_down' | 'closed';
+  // F5 · 'tal' = Trading at Last (13:10–13:30): no new position; an open one may still be closed at the auction price.
+  phase: 'pre_open' | 'calm' | 'peak' | 'step_down' | 'tal' | 'closed';
+  /** open, or TAL — a position may be closed now. */
+  canClose?: boolean;
   hour: number; timeStr: string; driftVsOpen: number; minutesToStepDown: number; lateToOpen: boolean; note: string;
   open: boolean; kuwaitDay: string; reserveReleased: boolean;
   driftByHour: { hour: number; driftFils: number; sessions: number }[]; driftMeasured: boolean;
@@ -203,9 +216,11 @@ export interface Sizing {
 }
 /** R-22 · the stop: one fil below the nearest aged shelf, off round numbers, gap-aware. */
 export interface Stop {
-  symbol: string; stopFils: number | null; shelfFils: number | null; shelfAgeMins?: number; shelfQty?: number;
+  symbol: string; stopFils: number | null; shelfFils?: number | null; shelfAgeMins?: number; shelfQty?: number;
   capturedAt?: string | null; steppedForRound?: boolean; gap?: { from: number; to: number; fils: number } | null;
   reason: string; error?: string;
+  // F2 · true once a position is open: the stop is the one RECORDED at the fill, never re-derived. hitAt when the bid printed through it.
+  fixedAtFill?: boolean; hitAt?: string | null;
 }
 export interface FillTime {
   symbol: string; bidFils: number; bidShares: number; queueAheadShares: number; queueSharePct: number | null;
@@ -219,11 +234,29 @@ export interface DetailLeg {
   id: number; seq: number; side: 'BUY' | 'SELL'; status: string; price: number; shares: number;
   filledShares: number | null; commissionKd: number | null; postedAt: string | null; resolvedAt: string | null;
   note: string; exitVenue: string | null;
+  // F1 · the queued rest of a partial fill; F2 · the stop fixed at the fill; F3/F4 · taken anyway.
+  restStatus?: 'POSTED' | 'FILLED' | 'CANCELLED' | null; restingShares?: number;
+  stopFils?: number | null; stopHitAt?: string | null;
+  isOverride?: boolean; overrideReason?: string | null;
 }
 export interface ClosedContract { seq: number; entry: number; exit: number; shares: number; netKd: number; feesKd: number }
+/** F6 · one hold fact: computed with its numbers, or not — with the reason. Never a zero. */
+export type HoldFact<T extends object = Record<string, unknown>> = ({ computed: true } & T) | { computed: false; reason: string };
+export interface HoldFacts {
+  mark: HoldFact<{ bidFils: number; entryFils: number | null; unrealisedKd: number | null; markedAt: string | null }>;
+  bidProtected: HoldFact<{ qty: number; thresholdQty: number; protectedNow: boolean; agedBelow: boolean; note: string }>;
+  exitAt: HoldFact<{ targetNormal: number; targetTrending: number | null; breakEven: number | null; stopFils: number | null }>;
+  volume: HoldFact<{ ratio: number; note: string }>;
+  ceiling: HoldFact<{ priceFils: number | null; qty: number | null; presencePct: number | null; note: string }>;
+  refill: HoldFact;
+  exitOk: HoldFact<{ offerQty: number; yourShares: number; multiple: number; thresholdX: number; ok: boolean; note: string }>;
+}
+
 export interface Detail {
   symbol: string; tradingDay: string; budgetKd: number;
   candidate: StockCandidate | null; orderBook: OrderBook | null;
+  // F6 · the hold block, assembled server-side from this same bundle.
+  holdFacts?: HoldFacts;
   sizing: Sizing; fillTime: FillTime | null; depthSignal: DepthSignal;
   contract: TradingContract | null; legs: DetailLeg[]; closedToday: ClosedContract[];
   stop?: Stop;
@@ -233,11 +266,26 @@ export interface Detail {
   lastMove?: { priceFils: number; qty: number | null; painted: boolean; at: string; paintMaxShares: number } | null;
   // R-11 · the scraper's capture interval (from QUALITY); the ladder's stale = 3 × it.
   captureIntervalSecs?: number;
-  session: { open: boolean; phase: string; note: string };
+  // F5 · canClose: open, or Trading at Last (close at the auction price only).
+  session: { open: boolean; phase: string; note: string; canClose?: boolean; tal?: boolean };
 }
 
 /** What the trading writes answer. */
-export interface TradeResult { ok?: boolean; warning?: string | null; commissionKnown?: boolean; costKd?: number; note?: string; ruleBreach?: { mode: string; reasons: string[]; at: string } | null; contracts: TradingContract[] }
+export interface TradeResult {
+  ok?: boolean; warning?: string | null; commissionKnown?: boolean; costKd?: number; note?: string;
+  ruleBreach?: { mode: string; reasons: string[]; at: string } | null;
+  // F1 · a partial fill: what filled and what is still resting on the leg.
+  partial?: { filled: number; of: number; resting: number } | null;
+  rest?: { of: number; filled: number; resting?: number; cancelled?: number };
+  // F2 · the stop recorded at the fill (null with the reason when no shelf had aged).
+  stop?: { stopFils: number | null; reason: string } | null;
+  // F5 · where the close happened.
+  venue?: 'MARKET' | 'AUCTION';
+  contracts: TradingContract[];
+}
+/** F3 / F4 · the 409 codes the operator may take anyway (with a reason). Plain REFUSED is not one of them. */
+export const OVERRIDABLE_CODES = ['OUTSIDE_SIZE_BAND', 'NOT_TAKE', 'BOARD_NOT_COMPUTED'] as const;
+export type OverridableCode = typeof OVERRIDABLE_CODES[number];
 
 /** Alerts the socket pushes into the feed. */
 export interface AlertMsg { kind: string; symbol?: string; level: 'danger' | 'warning' | 'info'; title: string; body: string; at: string }
