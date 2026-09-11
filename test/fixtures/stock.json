@@ -164,6 +164,10 @@
     "notComputed": [],
     "gateStatsSource": "BACKEND_BRIDGE",
     "everTraded": null,
-    "bookCapturedToday": null
+    "bookCapturedToday": null,
+    "bucket": "TAKE",
+    "structuralReason": null,
+    "noRow": false,
+    "lastRowDay": null
   }
 }

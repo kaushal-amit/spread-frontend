@@ -39,21 +39,25 @@ vi.mock("socket.io-client", () => ({ io: () => fakeSocket }));
 
 import { useBoard, useDetail } from "../src/api/hooks";
 import { SessionBanner } from "../src/components/SessionBanner";
+import { _reset } from "../src/api/snapshot";
 
 let root: Root, host: HTMLDivElement;
-beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); for (const k of Object.keys(handlers)) delete handlers[k]; emitted.length = 0; });
+beforeEach(() => { _reset(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); for (const k of Object.keys(handlers)) delete handlers[k]; emitted.length = 0; });
 afterEach(() => { act(() => root.unmount()); host.remove(); for (const k of Object.keys(pending)) delete pending[k]; });
 
-const emptyBoard = { tradingDay: "2026-09-10", budgetKd: 800, recommended: [], nearMiss: [], rejected: [], notComputed: [],
+const emptyBoard = { tradingDay: "2026-09-10", budgetKd: 800, take: [], oneAway: [], priceWarn: [], leave: [], recommended: [], nearMiss: [], rejected: [], notComputed: [],
   counts: {}, reach: null, session: { open: true, phase: "peak", note: "" }, coverage: null };
+// The socket plan · the board arrives as a SECTION of spread:snapshot.
+let seq = 0;
+const snap = (board: unknown) => ({ seq: ++seq, at: new Date().toISOString(), tradingDay: "2026-09-10", budgetKd: 800, partial: false, parts: ["board"], final: false, reason: "test", board });
 
 describe("useBoard · a board the server could not compute is an error, not an empty board", () => {
   let cap: ReturnType<typeof useBoard>;
   function H() { cap = useBoard(); return null; }
 
-  it("spread:update with `error` sets the board error with the server's code", async () => {
+  it("a snapshot whose board carries `error` sets the board error with the server's code", async () => {
     act(() => root.render(<H />));
-    await act(async () => { fire("spread:update", { ...emptyBoard, error: { code: "DB_DOWN", error: "the board could not be computed" } }); });
+    await act(async () => { fire("spread:snapshot", snap({ ...emptyBoard, error: { code: "DB_DOWN", error: "the board could not be computed" } })); });
     expect(cap.error).not.toBeNull();
     expect((cap.error as { code?: string }).code).toBe("DB_DOWN");
     expect(cap.data?.all.length).toBe(0);
@@ -61,11 +65,21 @@ describe("useBoard · a board the server could not compute is an error, not an e
 
   it("a computed board clears the error", async () => {
     act(() => root.render(<H />));
-    await act(async () => { fire("spread:update", { ...emptyBoard, error: { code: "DB_DOWN", error: "x" } }); });
-    await act(async () => { fire("spread:update", { ...emptyBoard, counts: { total: 0 }, error: null }); });
+    await act(async () => { fire("spread:snapshot", snap({ ...emptyBoard, error: { code: "DB_DOWN", error: "x" } })); });
+    await act(async () => { fire("spread:snapshot", snap({ ...emptyBoard, counts: { total: 0 }, error: null })); });
     expect(cap.error).toBeNull();
   });
+
+  it("a board section the server could not BUILD ({ error } in its slot) is the board error too, never a quiet empty board", async () => {
+    act(() => root.render(<H />));
+    await act(async () => { fire("spread:snapshot", snap({ error: { code: "NOT_READY", error: "no session budget is set" } })); });
+    expect((cap.error as { code?: string })?.code).toBe("NOT_READY");
+    expect(cap.data).toBeNull();
+  });
 });
+
+// the focus channel: the server pushes the FOCUSED symbol's quote/book/contract on change
+const focusMsg = (book: { capturedAt: string | null; b: number[][]; o: number[][] }) => ({ symbol: "ABAR", at: new Date().toISOString(), quote: null, book, contract: null });
 
 describe("useDetail · the ladder clock moves only on a NEW capture", () => {
   let cap: ReturnType<typeof useDetail>;
@@ -77,14 +91,14 @@ describe("useDetail · the ladder clock moves only on a NEW capture", () => {
     act(() => root.render(<H />));
     await act(async () => { pending["/stocks/ABAR/detail"][0].resolve(detail); });
     expect(cap.bookAt).toBeNull();
-    await act(async () => { fire("spread:book", { symbol: "ABAR", book: { capturedAt: "2026-09-10T07:00:00Z", b: [[200, 1000]], o: [[201, 500]] } }); });
+    await act(async () => { fire("spread:focus", focusMsg({ capturedAt: "2026-09-10T07:00:00Z", b: [[200, 1000]], o: [[201, 500]] })); });
     const first = cap.bookAt;
     expect(first).not.toBeNull();
     vi.setSystemTime(new Date("2026-09-10T07:05:00Z"));
-    // the server repeats the same capture every tick — the old code stamped Date.now() each time
-    await act(async () => { fire("spread:book", { symbol: "ABAR", book: { capturedAt: "2026-09-10T07:00:00Z", b: [[200, 1000]], o: [[201, 500]] } }); });
+    // the same capture again (a quote moved, the book did not) — the clock stays
+    await act(async () => { fire("spread:focus", focusMsg({ capturedAt: "2026-09-10T07:00:00Z", b: [[200, 1000]], o: [[201, 500]] })); });
     expect(cap.bookAt).toBe(first);
-    await act(async () => { fire("spread:book", { symbol: "ABAR", book: { capturedAt: "2026-09-10T07:04:50Z", b: [[200, 900]], o: [[201, 500]] } }); });
+    await act(async () => { fire("spread:focus", focusMsg({ capturedAt: "2026-09-10T07:04:50Z", b: [[200, 900]], o: [[201, 500]] })); });
     expect(cap.bookAt).not.toBe(first);
     expect(cap.data?.orderBook?.bids[0].qty).toBe(900);
     vi.useRealTimers();
@@ -93,47 +107,56 @@ describe("useDetail · the ladder clock moves only on a NEW capture", () => {
   it("an empty-book push (symbol outside the sweep) leaves the REST ladder alone", async () => {
     act(() => root.render(<H />));
     await act(async () => { pending["/stocks/ABAR/detail"][0].resolve(detail); });
-    await act(async () => { fire("spread:book", { symbol: "ABAR", book: { capturedAt: null, b: [], o: [] } }); });
+    await act(async () => { fire("spread:focus", focusMsg({ capturedAt: null, b: [], o: [] })); });
     expect(cap.data?.orderBook?.bids.length).toBe(1);
     expect(cap.bookAt).toBeNull();
   });
 });
 
-describe("useDetail · watches survive a reconnect", () => {
+describe("useDetail · the focus survives a reconnect", () => {
   function H() { useDetail("ABAR", 0); return null; }
-  it("re-emits spread:watch on connect (the server's watch set is per socket.id and empty after a reconnect)", async () => {
+  it("re-emits spread:focus on connect (the server keeps the focus per socket.id and a reconnect is a new id)", async () => {
     act(() => root.render(<H />));
-    const before = emitted.filter((e) => e.ev === "spread:watch").length;
+    const before = emitted.filter((e) => e.ev === "spread:focus" && (e.arg as { symbol: string | null }).symbol === "ABAR").length;
     expect(before).toBe(1);
     await act(async () => { fire("connect", undefined); });
-    const after = emitted.filter((e) => e.ev === "spread:watch");
+    const after = emitted.filter((e) => e.ev === "spread:focus" && (e.arg as { symbol: string | null }).symbol === "ABAR");
     expect(after.length).toBe(2);
-    expect(after[1].arg).toEqual({ symbol: "ABAR" });
+  });
+  it("leaving the symbol clears the focus (null), so the server stops pushing it", () => {
+    act(() => root.render(<H />));
+    act(() => root.unmount()); root = createRoot(host);
+    expect(emitted.some((e) => e.ev === "spread:focus" && (e.arg as { symbol: string | null }).symbol === null)).toBe(true);
   });
 });
 
-describe("usePolled · a tick coalesces into the poll cadence instead of adding to it", () => {
-  it("a signal inside half the interval does not refetch; one beyond it does and restarts the clock", async () => {
+describe("the socket plan · nothing polls", () => {
+  it("useAccount is a SECTION of the snapshot: no GET /account ever, the value arrives by push", async () => {
     vi.useFakeTimers({ now: 1_000_000 });
     const { useAccount } = await import("../src/api/hooks");
-    let tick = 0;
-    function H({ t }: { t: number }) { useAccount(t); return null; }
-    const calls = () => (pending["/account"] || []).length;
-    act(() => root.render(<H t={tick} />));
-    expect(calls()).toBe(1);                              // the mount poll
-    // tick 1 at +3 s: the mount fetch is 3 s old — under 15 s / 2 → no refetch
-    await act(async () => { vi.advanceTimersByTime(3_000); });
-    act(() => root.render(<H t={++tick} />));
-    await act(async () => { vi.advanceTimersByTime(1_300); });   // past the 1.2 s debounce
-    expect(calls()).toBe(1);
-    // tick 2 at +10 s: 10 s old ≥ 7.5 s → ONE refetch, and the poll clock restarts
-    await act(async () => { vi.advanceTimersByTime(5_700); });
-    act(() => root.render(<H t={++tick} />));
-    await act(async () => { vi.advanceTimersByTime(1_300); });
-    expect(calls()).toBe(2);
-    // the base poll would have fired at +15 s from mount; it does NOT (restarted at +11.3 s)
-    await act(async () => { vi.advanceTimersByTime(4_000); });   // now +15.3 s
-    expect(calls()).toBe(2);
+    let cap: ReturnType<typeof useAccount> | null = null;
+    function H() { cap = useAccount(); return null; }
+    act(() => root.render(<H />));
+    await act(async () => { vi.advanceTimersByTime(120_000); });
+    expect(pending["/account"]).toBeUndefined();
+    expect((pending["/bootstrap"] || []).length).toBe(1);          // the one seed
+    await act(async () => { fire("spread:snapshot", { seq: 9, at: "x", tradingDay: "2026-09-10", budgetKd: 800, partial: true, parts: ["account"], final: false, reason: "trade", account: { equityKd: 812.5 } }); });
+    expect((cap as unknown as { data: { equityKd: number } }).data?.equityKd).toBe(812.5);
+    expect((pending["/account"] || []).length).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("an on-demand read (the candle grain) fetches on its inputs, never on a timer", async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const { useCandles } = await import("../src/api/hooks");
+    function H({ m }: { m: number }) { useCandles("ABAR", m); return null; }
+    act(() => root.render(<H m={5} />));
+    expect((pending["/candles/ABAR"] || []).length).toBe(1);
+    await act(async () => { vi.advanceTimersByTime(600_000); });   // ten minutes: no timer fires
+    expect((pending["/candles/ABAR"] || []).length).toBe(1);
+    act(() => root.render(<H m={60} />));                        // the grain changed → one read
+    await act(async () => { vi.advanceTimersByTime(1_500); });
+    expect((pending["/candles/ABAR"] || []).length).toBe(2);
     vi.useRealTimers();
   });
 });

@@ -9,18 +9,25 @@
  * makes the whole request budget legible and changeable in one edit.
  */
 
-/** Poll intervals, per resource (ms). The hook names map one-to-one. */
-export const POLL_MS = {
-  account: 15_000,
-  budget: 15_000,
-  session: 30_000,
-  market: 60_000,
-  contracts: 10_000,
-  feeds: 60_000,
-  detail: 10_000,
-  sessions: 600_000,
-  review: 600_000,
-  candles: 30_000,
+/**
+ * THE SOCKET PLAN (10 Sep) · there are NO periodic REST polls any more. The
+ * server pushes one snapshot a minute (board, account, budget, session,
+ * market, contracts, feeds, slots), a partial within 5 s of any write, and
+ * one marked final after the close; GET /api/bootstrap seeds the first paint.
+ * The reads that remain are ON DEMAND — a candle grain, the session list, a
+ * review day — fetched when their inputs change or a snapshot says something
+ * moved, never on a timer. (nosecret/nopoll tests assert this.)
+ *
+ * LIVENESS · the heartbeat (`spread:tick`) is emitted every 10 s from the
+ * ticker's own loop. deadAfterMs = 3 × that: TICKER DEAD on every tab, every
+ * write button disabled. staleAfterMs: heartbeats arrive but no snapshot for
+ * 2.5 × the minute — alive but the board build is wedged.
+ */
+export const LIVENESS = {
+  heartbeatMs: 10_000,
+  deadAfterMs: 30_000,
+  snapshotMs: 60_000,
+  staleAfterMs: 150_000,
 } as const;
 
 /**
@@ -67,4 +74,4 @@ export const BACKOFF = { factor: 2, maxDoublings: 3, maxFails: 6 } as const;
 export const DEBOUNCE_MS = 1_200;
 
 /** The board reads STALE when the last socket update is older than this (ms). */
-export const BOARD_STALE_MS = 120_000;
+export const BOARD_STALE_MS = LIVENESS.staleAfterMs;

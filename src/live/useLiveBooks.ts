@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Book, Slot, getSlots } from "./api";
-import { getSocket } from "../api/hooks";
+import { Book, Slot } from "./api";
+import { getSocket } from "../api/socket";
+import { useSnapshotState, isSectionError, bootstrap, type SlotList } from "../api/snapshot";
 
 /**
  * src/live/useLiveBooks.ts — five books, pushed.
@@ -10,8 +11,11 @@ import { getSocket } from "../api/hooks";
  * it serves REVIEW mode. Feeding a live screen from it would blur the boundary
  * that stops a review screen triggering a live action.
  *
- * So: fetch the slot list once on load, then take every book from the
- * `spread:book` push, which carries the levels rather than a signal to refetch.
+ * So: the slot list comes from the snapshot's `slots` section (the socket
+ * plan — pushed a minute, and as a partial right after a swap), then every
+ * book from the `spread:book` push, which the server sends ON CHANGE for the
+ * watched symbols — a tile that stops receiving is a tile whose capture
+ * stopped, which is the truth.
  */
 export function useLiveBooks() {
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -38,22 +42,28 @@ export function useLiveBooks() {
     watched.current = next;
   };
 
-  const reloadSlots = async () => {
-    try {
-      const r = await getSlots();
-      const list = r?.symbols || [];
-      setSlots(list);
-      setSlotCount(typeof r?.slotCount === "number" && r.slotCount > 0 ? r.slotCount : null);
-      watch(list.map((x) => x.symbol));
-      setError(null);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
+  // The slot list is a SECTION of the snapshot: no fetch, no 30 s loop. An
+  // error in that section is shown as the slots error (the scraper unreachable
+  // or unconfigured), never a silent empty list.
+  const st = useSnapshotState();
+  const slotsRaw = st.sections.slots;
+  useEffect(() => {
+    if (slotsRaw === undefined) return;
+    if (isSectionError(slotsRaw)) { setError(slotsRaw.error.error); return; }
+    const r = slotsRaw as SlotList;
+    const list = r?.symbols || [];
+    setSlots(list);
+    setSlotCount(typeof r?.slotCount === "number" && r.slotCount > 0 ? r.slotCount : null);
+    watch(list.map((x) => x.symbol));
+    setError(null);
+     
+  }, [slotsRaw]);
+  // After a swap the backend announces a `slots` partial within 5 s; a
+  // bootstrap fetches the same object now, for the tile that just asked.
+  const reloadSlots = async () => { await bootstrap("slots"); };
 
   useEffect(() => {
-    reloadSlots();
-    // ONE shared socket for the app (api/hooks.ts) — this used to open its own
+    // ONE shared socket for the app (api/socket.ts) — this used to open its own
     // and close it on every tab switch.
     const s = getSocket();
     // On (re)connect the server's watch set is empty (it is keyed by socket.id):
@@ -103,7 +113,7 @@ export function useLiveBooks() {
       for (const sym of watched.current) s.emit("spread:unwatch", { symbol: sym });
       watched.current = new Set();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   return { slots, slotCount, books, connected, error, reloadSlots };

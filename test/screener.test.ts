@@ -27,6 +27,7 @@ function cand(over: Partial<StockCandidate> = {}): StockCandidate {
       dailyRangeFils: 8, targetTicks: 1, walkedUp: false,
     },
     dataQuality: "OK", notComputed: [], gateStatsSource: "SCRAPER", everTraded: true, bookCapturedToday: true,
+    bucket: "TAKE", structuralReason: null, noRow: false, lastRowDay: null,
   } as StockCandidate;
   return { ...base, ...over, metrics: { ...base.metrics, ...(over.metrics || {}) } };
 }
@@ -39,7 +40,7 @@ describe("screener · the seven filters (C1)", () => {
   });
 
   it("PASSES EVERY GATE keeps only the recommended", () => {
-    const list = [cand({ status: "recommended" }), cand({ status: "near_miss" }), cand({ status: "rejected" })];
+    const list = [cand({ status: "recommended", bucket: "TAKE" }), cand({ status: "near_miss", bucket: "ONE_AWAY" }), cand({ status: "rejected", bucket: "LEAVE" })];
     expect(applyScreener(list, "PASSES").map((s) => s.status)).toEqual(["recommended"]);
   });
 

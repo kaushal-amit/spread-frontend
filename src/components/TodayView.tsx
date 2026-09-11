@@ -12,7 +12,7 @@
  *                        and summed at the top, because for weeks this was
  *                        indistinguishable from a quiet market
  */
-import React from "react";
+import React, { useState } from "react";
 import type { StockCandidate, TradingContract, MarketDay, Budget } from "../api/types";
 import type { Board, Live } from "../api/hooks";
 import { fmt } from "../utils/format";
@@ -70,9 +70,13 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   const chgFil = (chg: number, price: number | null | undefined) =>
     Math.abs(chg).toFixed(price != null && Number(price) < 100 ? 1 : 0);
 
-  const rec = board?.recommended ?? [];
-  const near = board?.nearMiss ?? [];
-  const rej = board?.rejected ?? [];
+  // CR-8 · the four verdict buckets from the server (screening.js bucketize):
+  // TAKE / ONE AWAY / PRICE WARN / LEAVE, plus NOT COMPUTED below. Nothing is
+  // removed: `all` is their concatenation and equals counts.universe.
+  const rec = board?.take ?? [];
+  const near = board?.oneAway ?? [];
+  const priceWarn = board?.priceWarn ?? [];
+  const rej = board?.leave ?? [];
   const all = board?.all ?? [];
   // SPR-38 · the NOT COMPUTED bucket is the SERVER's (cards that fail only on
   // uncomputed gates). Deriving it from `all` put every rejected card with one
@@ -84,8 +88,20 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   // slices so ALL is the board unchanged and any other chip narrows it.
   const recF = applyScreener(rec, filter);
   const nearF = applyScreener(near, filter);
+  const pwF = applyScreener(priceWarn, filter);
   const rejF = applyScreener(rej, filter);
   const ncF = applyScreener(notComputed, filter);
+  // CR-8 · the LEAVE fold: structural rows (out of reach, below tick, infeasible
+  // target, suspended) are FOLDED at the foot of LEAVE with their counts —
+  // folded, never filtered. The trader can open the fold; they cannot be shown
+  // a stock that was never there.
+  const rejOpen = rejF.filter((s) => !s.structuralReason);
+  const rejFolded = rejF.filter((s) => !!s.structuralReason);
+  const [foldOpen, setFoldOpen] = useState(false);
+  const foldCounts = (["OUT_OF_REACH", "BELOW_TICK", "INFEASIBLE_TARGET", "SUSPENDED"] as const)
+    .map((r) => [r, rejFolded.filter((s) => s.structuralReason === r).length] as const)
+    .filter(([, n]) => n > 0);
+  const FOLD_LABEL: Record<string, string> = { OUT_OF_REACH: `out of reach at ${board?.budgetKd ? fmt(board.budgetKd) : "this"} KD`, BELOW_TICK: "below the 100-fil tick", INFEASIBLE_TARGET: "target infeasible", SUSPENDED: "suspended" };
   const filterActive = filter !== "ALL";
   const matched = filterActive ? applyScreener(all, filter).length : all.length;
   // R-38 · the two causes come from the server (screening counts), not the browser.
@@ -117,13 +133,21 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
     const realFails = s.failingGateNames.filter((g) => !nc.has(g));
     const why = cls === "go"
       ? s.takeItBecause || `net ${kd(s.netKd)} at ${s.metrics.targetTicks} tick${s.metrics.targetTicks === 1 ? "" : "s"}`
+      // CR-8 · PRICE WARN is an economics line, not a stock verdict: the fils
+      // this price needs at this budget (CR-2), or that no move under 12 does.
+      : s.bucket === "PRICE_WARN"
+        ? `price ${s.price ?? "—"} — ${s.needsFils != null ? `needs ${s.needsFils} fil${s.needsFils === 1 ? "" : "s"} at ${board?.budgetKd ? fmt(board.budgetKd) : "this"} KD` : "no move under 12 fils nets the floor at this budget"}`
+      // The ABAR line: no row for the day, and when the last one was.
+      : s.noRow
+        ? s.rejectionDetail || `no symbol_day row for this day${s.lastRowDay ? ` — last row ${s.lastRowDay}` : ""}`
       : s.status === "not_computed" || (!realFails.length && nc.size)
         ? `NOT COMPUTED: ${[...nc].join(", ")}`
         : `${realFails.join(", ")}${nc.size ? ` · not computed: ${[...nc].join(", ")}` : ""}${s.rejectionDetail ? " · " + s.rejectionDetail : ""}`;
     // CR-7 · every gate's "value vs threshold — PASS/FAIL" line, on the card's tooltip.
     const checks = s.gateGroups?.flatMap((g) => g.cells).filter((c) => c.check?.text).map((c) => `${c.label}: ${c.check!.text}`).join("\n") ?? "";
     return (
-      <div key={`${s.symbol}-${cls}`} className={`pl ${cls === "near" ? "open" : cls} ${s.notComputed?.length ? "nc" : ""}`}
+      <div key={`${s.symbol}-${cls}`} className={`pl ${cls === "near" ? "open" : cls} ${s.notComputed?.length ? "nc" : ""} ${s.structuralReason ? "structural" : ""} ${s.bucket === "PRICE_WARN" ? "pw" : ""}`}
+        data-bucket={s.bucket} data-structural={s.structuralReason || undefined}
         id={`plan-card-${s.symbol}`} onClick={() => onPickSymbol(s.symbol)} title={[s.careful || "", checks].filter(Boolean).join("\n")}>
         <span className="s">{s.symbol}{s.market && /premier/i.test(s.market) ? <sup title="Premier Market: 0.10%"> P</sup> : null}</span>
         <span className="p">{s.price ?? "—"}{s.changeFils ? <small className={s.changeFils > 0 ? "up" : "dn"}> {s.changeFils > 0 ? "▲" : "▼"}{chgFil(s.changeFils, s.price)}</small> : null}</span>
@@ -196,7 +220,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
           : boardBroken ? <b className="dn">BOARD BROKEN — the server returned no symbols and no counts. Not a quiet market: check the backend.</b>
           : boardLoading && !board ? "Loading the board…"
           : board ? <>
-              {board.tradingDay ? `Session ${board.tradingDay}` : "Board"} · {all.length} symbols · <b>{rec.length}</b> recommended · <b>{near.length}</b> one gate away · {rej.length} rejected{notComputed.length ? ` · ${notComputed.length} not computed` : ""}
+              {board.tradingDay ? `Session ${board.tradingDay}` : "Board"} · {all.length} symbols · <b>{rec.length}</b> take · <b>{near.length}</b> one away · {priceWarn.length} price warn · {rej.length} leave{notComputed.length ? ` · ${notComputed.length} not computed` : ""}
               {board.budgetKd ? ` · slot ${fmt(board.budgetKd)} KD` : ""}
               {board.stops?.mode === "closed"
                 ? <b> · market closed</b>
@@ -255,18 +279,38 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
       </div>
 
       {nearF.length > 0 && (
-        <div className="plgrp">
-          <span className="plk">ONE GATE AWAY</span>
+        <div className="plgrp" id="section-one-away">
+          <span className="plk">ONE AWAY</span>
           {nearF.slice(0, 12).map((s) => card(s, "near"))}
           {nearF.length > 12 && <div className="pl none">and {nearF.length - 12} more</div>}
         </div>
       )}
 
+      {/* CR-8 · PRICE WARN — the price ceiling is the only failing fact. An
+          economics warning ("needs 3 fils at 2,000 KD"), not a stock verdict;
+          overridable, and it used to hide inside ONE AWAY / LEAVE unmarked. */}
+      {pwF.length > 0 && (
+        <div className="plgrp" id="section-price-warn">
+          <span className="plk">PRICE WARN · {pwF.length}</span>
+          {pwF.slice(0, 8).map((s) => card(s, "near"))}
+          {pwF.length > 8 && <div className="pl none">and {pwF.length - 8} more — above the ceiling for this budget</div>}
+        </div>
+      )}
+
       {rejF.length > 0 && (
-        <div className="plgrp">
-          <span className="plk">LEAVE ALONE · {rejF.length}</span>
-          {rejF.slice(0, 6).map((s) => card(s, "no"))}
-          {rejF.length > 6 && <div className="pl none">and {rejF.length - 6} more — sorted by what they would have paid</div>}
+        <div className="plgrp" id="section-leave">
+          <span className="plk">LEAVE · {rejF.length}</span>
+          {rejOpen.slice(0, 6).map((s) => card(s, "no"))}
+          {rejOpen.length > 6 && <div className="pl none">and {rejOpen.length - 6} more — sorted by what they would have paid</div>}
+          {/* CR-8 · the fold. Present, counted, openable — never removed. */}
+          {rejFolded.length > 0 && (
+            <>
+              <button type="button" className="pl none fold" id="leave-fold" aria-expanded={foldOpen} onClick={() => setFoldOpen((v: boolean) => !v)}>
+                {foldOpen ? "▾" : "▸"} {rejFolded.length} folded — {foldCounts.map(([r, n]) => `${n} ${FOLD_LABEL[r]}`).join(" · ")} · arithmetic, not judgement: no override
+              </button>
+              {foldOpen && rejFolded.map((s) => card(s, "no"))}
+            </>
+          )}
         </div>
       )}
 
@@ -275,7 +319,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
           "140 rejected" over cards that never failed a stock. */}
       {ncF.length > 0 && (
         <div className="plgrp">
-          <span className="plk">NOT COMPUTED · {ncF.length}</span>
+          <span className="plk">NOT COMPUTED · {ncF.length}{board?.counts?.noRow ? ` · ${board.counts.noRow} with no row for this day` : ""}</span>
           {ncF.slice(0, 6).map((s) => card(s, "no"))}
           {ncF.length > 6 && <div className="pl none">and {ncF.length - 6} more — a statistic is missing, not a failed stock</div>}
         </div>
@@ -285,7 +329,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         <p className="plan" style={{ marginTop: 16 }} id="board-gate-counts">
           Failures by gate:{" "}
           {Object.entries(board.counts)
-            .filter(([k]) => !["all", "recommended", "nearMiss", "rejected", "notComputed", "noQuotes", "noStats"].includes(k))
+            .filter(([k]) => !["all", "universe", "take", "oneAway", "priceWarn", "leave", "outOfReach", "belowTick", "suspended", "noRow", "recommended", "nearMiss", "rejected", "notComputed", "noQuotes", "noStats"].includes(k))
             .sort((a, b) => b[1] - a[1])
             .map(([k, v]) => `${k} ${v}`).join(" · ")}
         </p>

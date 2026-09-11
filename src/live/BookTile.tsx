@@ -33,6 +33,8 @@ interface Props {
   levels?: number;
   /** socket state — a tile cannot be live without it */
   connected: boolean;
+  /** The socket plan · TICKER DEAD / feed lost — no write may go out. */
+  writesBlocked?: boolean;
   /** a ticking clock from the parent, so staleness is re-evaluated without a push */
   now: number;
   /** R-11 · the scraper's capture interval, from the server; stale = 3 × it */
@@ -44,7 +46,7 @@ interface Props {
  * The parent keeps books in a map keyed by symbol and passes each tile its
  * own slice; with five tiles on screen, one push is one render.
  */
-export const BookTile: React.FC<Props> = React.memo(function BookTile({ slot, book, onSwapped, levels = 8, connected, now, captureIntervalSecs }) {
+export const BookTile: React.FC<Props> = React.memo(function BookTile({ slot, book, onSwapped, levels = 8, connected, writesBlocked = false, now, captureIntervalSecs }) {
   const [swapping, setSwapping] = useState(false);
   const [next, setNext] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -52,6 +54,7 @@ export const BookTile: React.FC<Props> = React.memo(function BookTile({ slot, bo
   const doSwap = async () => {
     const sym = next.trim().toUpperCase();
     if (!sym) return;
+    if (writesBlocked) { setErr("ticker dead — no write goes out until the feed is back"); return; }
     try {
       setErr(null);
       await swapSlot(slot.slot, sym, "swapped from the book screen");
@@ -101,7 +104,7 @@ export const BookTile: React.FC<Props> = React.memo(function BookTile({ slot, bo
             placeholder="symbol"
             autoFocus
           />
-          <button onClick={doSwap}>swap</button>
+          <button onClick={doSwap} disabled={writesBlocked} title={writesBlocked ? "ticker dead — writes disabled" : undefined}>swap</button>
           {err && <div className="book-err">{err}</div>}
         </div>
       )}

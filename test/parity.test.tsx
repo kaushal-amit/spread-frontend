@@ -21,22 +21,17 @@ vi.mock("../src/api/client", async (orig) => {
 const fakeSocket = { connected: true, on: () => {}, off: () => {}, emit: () => {} };
 vi.mock("socket.io-client", () => ({ io: () => fakeSocket }));
 
-let slotsReply: unknown = { symbols: [], trading_date: "2026-09-10", slotCount: 5 };
-vi.mock("../src/live/api", async (orig) => {
-  const actual = await (orig() as Promise<Record<string, unknown>>);
-  return {
-    ...actual,
-    getSlots: vi.fn(() => Promise.resolve(slotsReply)),
-    getBoard: vi.fn(() => Promise.resolve([])),
-    getContracts: vi.fn(() => Promise.resolve([])),
-  };
-});
+// The socket plan · the slots, the board and the contracts are SECTIONS of the
+// snapshot store; the tests apply one directly.
+import { applySnapshot, _reset } from "../src/api/snapshot";
+const slotsSnap = (slots: unknown) => applySnapshot({ seq: 1, at: "x", tradingDay: "2026-09-10", budgetKd: 700, partial: false, parts: ["slots", "board", "contracts"], final: false, reason: "test",
+  slots: slots as never, board: { tradingDay: "2026-09-10", budgetKd: 700, take: [], oneAway: [], priceWarn: [], leave: [], recommended: [], nearMiss: [], rejected: [], notComputed: [], counts: {}, reach: null, session: { open: true, phase: "peak", note: "" }, coverage: null } as never, contracts: [] });
 
 import { CandleChart } from "../src/components/CandleChart";
 import { BooksView } from "../src/live/BooksView";
 
 let root: Root, host: HTMLDivElement;
-beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
+beforeEach(() => { _reset(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
 afterEach(() => { act(() => root.unmount()); host.remove(); for (const k of Object.keys(pending)) delete pending[k]; });
 
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -78,19 +73,26 @@ describe("CandleChart · the chart view is /candles for the focused symbol", () 
 
 describe("BooksView · slot chips follow the scraper's slotCount", () => {
   it("2 held of 5 → two tiles, three `free` chips, and the header says 2 of 5", async () => {
-    slotsReply = { symbols: [{ slot: 1, symbol: "KHOT", code: null }, { slot: 3, symbol: "ABAR", code: null }], trading_date: "2026-09-10", slotCount: 5 };
     act(() => root.render(<BooksView />));
-    await flush(); await flush();
+    await act(async () => { slotsSnap({ symbols: [{ slot: 1, symbol: "KHOT", code: null }, { slot: 3, symbol: "ABAR", code: null }], trading_date: "2026-09-10", slotCount: 5 }); });
+    await flush();
     expect(host.querySelectorAll(".book-free")).toHaveLength(3);
     expect([...host.querySelectorAll(".book-free")].map((e) => e.getAttribute("data-slot"))).toEqual(["2", "4", "5"]);
     expect(host.querySelector("#slot-count")?.textContent).toMatch(/2 of 5 slots held/);
   });
 
   it("no slotCount from the scraper → no free chips are invented", async () => {
-    slotsReply = { symbols: [{ slot: 1, symbol: "KHOT", code: null }], trading_date: "2026-09-10" };
     act(() => root.render(<BooksView />));
-    await flush(); await flush();
+    await act(async () => { slotsSnap({ symbols: [{ slot: 1, symbol: "KHOT", code: null }], trading_date: "2026-09-10" }); });
+    await flush();
     expect(host.querySelectorAll(".book-free")).toHaveLength(0);
     expect(host.querySelector("#slot-count")?.textContent).toMatch(/^1 slot /);
+  });
+
+  it("a slots section the server could not build is the slots ERROR on the bar, never an empty strip", async () => {
+    act(() => root.render(<BooksView />));
+    await act(async () => { slotsSnap({ error: { code: "NOT_READY", error: "the scraper did not answer /depth-symbols" } }); });
+    await flush();
+    expect(host.querySelector(".book-err")?.textContent).toMatch(/slots: the scraper did not answer/);
   });
 });

@@ -23,7 +23,10 @@ export interface GateGroup { groupName: string; cells: GateCell[] }
 export interface BehaviourFlag { flag: string; icon: string; label: string; why: string }
 
 export type Verdict = 'TRADABLE' | 'NEAR_MISS' | 'NOT_RECOMMENDED' | 'REJECTED' | 'OUT_OF_REACH' | 'DEAD';
-export type Status = 'recommended' | 'near_miss' | 'rejected' | 'not_computed';
+export type Status = 'recommended' | 'near_miss' | 'price_warn' | 'rejected' | 'not_computed';
+/** CR-8 · the four verdict buckets + NOT COMPUTED. Every instrument is in exactly one; nothing is removed. */
+export type Bucket = 'TAKE' | 'ONE_AWAY' | 'PRICE_WARN' | 'LEAVE' | 'NOT_COMPUTED';
+export type StructuralReason = 'OUT_OF_REACH' | 'BELOW_TICK' | 'INFEASIBLE_TARGET' | 'SUSPENDED';
 
 /**
  * A NUMBER THAT IS NOT KNOWN TRAVELS AS NULL, NEVER AS 0 (backend present.js).
@@ -39,6 +42,15 @@ export interface StockCandidate {
   shares: Num; notionalKd: Num; roundTripKd: Num; netKd: Num; netPerFilKd: Num;
   trendWarn: boolean; changeFils: Num; changePct: Num; rising: boolean | null;
   status: Status; verdict: Verdict;
+  /** CR-8 · decided server-side (screening.js bucketize). */
+  bucket: Bucket;
+  /** PRICE WARN only: the smallest tick move that nets the floor at this budget; null = none under 12 fils. */
+  needsFils?: number | null;
+  /** Why a LEAVE row is folded: measured, non-overridable. null for an ordinary row. */
+  structuralReason: StructuralReason | null;
+  /** The ABAR line: no symbol_day row for the screen day; lastRowDay names the last one. */
+  noRow: boolean;
+  lastRowDay: string | null;
   failingGatesCount: number; failingGateNames: string[]; rejectionDetail?: string;
   gateGroups: GateGroup[]; takeItBecause?: string; careful?: string;
   headroom: { minKd: Num; maxKd: Num; profitPerFil: Num; currentKd: Num; headroomX: Num };
@@ -153,6 +165,8 @@ export interface MarketDay {
 /** The socket's `spread:update` payload: the same presenters, all three sections. */
 export interface BoardUpdate {
   tradingDay: string; budgetKd: number;
+  // CR-8 · the four verdict buckets. The three old names ride along for one release.
+  take?: StockCandidate[]; oneAway?: StockCandidate[]; priceWarn?: StockCandidate[]; leave?: StockCandidate[];
   recommended: StockCandidate[]; nearMiss: StockCandidate[]; rejected: StockCandidate[];
   // SPR-38 · cards that fail only on NOT COMPUTED gates — their own bucket.
   notComputed?: StockCandidate[];

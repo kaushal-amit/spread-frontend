@@ -32,6 +32,7 @@ import { FeedSection } from "./components/FeedSection";
 import { AskBar } from "./components/AskBar";
 import { useAccount, useAlerts, useBoard, useBudget, useContracts, useDetail, useMarket, useSession, useSessions, useReviewBoard, useFeeds, fetchFeedHistory, isSelectableSession, getSocket } from "./api/hooks";
 import { configError } from "./api/client";
+import { useLiveness } from "./api/snapshot";
 import { Columns2, MessageSquare } from "lucide-react";
 
 type Tab = "TODAY" | "BOOKS" | "STATES" | { symbol: string };
@@ -53,14 +54,15 @@ const rvChg = (chg: number | null | undefined, close: number | null | undefined)
 export default function App() {
   // ── live state ──────────────────────────────────────────────────────────
   const board = useBoard();
-  // D5 · SPR-33 for the SILENT socket. socket.io reports `connected` even when the
-  // server has stopped emitting, so a hard-disconnect check alone leaves the page
-  // reading "live" on a frozen board. Tick a clock and treat a board older than
-  // FEED_STALE_MS as stale, whether or not the socket says it is connected.
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(t); }, []);
-  const FEED_STALE_MS = 120000; // 120s — the same cue TodayView shows inline
-  const feedStale = board.at != null && now - board.at > FEED_STALE_MS;
+  /*
+   * The socket plan · ONE liveness verdict for every tab (api/snapshot.ts):
+   * the heartbeat is the proof of life — no heartbeat for 30 s is TICKER DEAD,
+   * every write button disabled; heartbeats without a snapshot for 150 s is
+   * "alive but the board is stale"; a final snapshot is CLOSED. There is no
+   * background poll to make a dead server look alive (SPR-33).
+   */
+  const live = useLiveness();
+  const writesBlocked = live.dead || live.mode === "disconnected";
   const account = useAccount(board.tick);
   const budgetLive = useBudget(board.tick);
   const session = useSession();
@@ -234,7 +236,7 @@ export default function App() {
       <ErrorBoundary name="TOPBAR">
       <TopBar
         account={account} budget={budgetLive} session={session} market={market}
-        contracts={contractsLive} feeds={feeds} errors={apiErrors} connected={board.connected}
+        contracts={contractsLive} feeds={feeds} errors={apiErrors} connected={board.connected && !live.dead} liveMode={live.mode}
         onBudgetSaved={() => { budgetLive.refresh(); board.refresh(); }}
         selectedDate={selectedDate} onDateChange={onDatePicked}
         minDate={(sessions.data?.sessions ?? []).reduce<string | undefined>((m, s) => (m == null || s.date < m ? s.date : m), undefined)}
@@ -262,21 +264,24 @@ export default function App() {
         </div>
       )}
 
-      {/* SPR-33 · a dropped push channel is SHOWN, not left reading "live" on
-          stale data. Fires on a hard disconnect OR (D5) when the socket is
-          connected but the board has not updated in FEED_STALE_MS — a silent
-          feed is just as stale as a dropped one. socket.io reconnects underneath. */}
-      {board.at != null && (!board.connected || feedStale) && (
-        <div className="session-banner session-danger" id="conn-banner" role="status">
+      {/* SPR-33 · the liveness banner, on EVERY tab. Dead, stale or dropped is
+          SHOWN — the socket plan's heartbeat decides, never a poll. */}
+      {live.mode !== "live" && live.mode !== "closed" && live.mode !== "connecting" && (
+        <div className={`session-banner ${live.dead || live.mode === "disconnected" ? "session-danger" : "session-warning"}`} id="conn-banner" role="status" data-live={live.mode}>
           <span className="session-banner-pip" />
           <span className="session-banner-title">
-            {board.connected ? "FEED STALLED — no update" : "LIVE FEED LOST — reconnecting…"}
+            {live.dead ? "TICKER DEAD" : live.mode === "disconnected" ? "LIVE FEED LOST — reconnecting…" : "BOARD STALE"}
           </span>
           <span className="session-banner-why">
-            {board.connected
-              ? `no update in ${Math.round((now - board.at) / 1000)}s — showing the last, not live`
-              : (board.disconnectedSince ? `since ${kuwaitHHMM(board.disconnectedSince)} Kuwait · ` : "") + "showing the last update, not live"}
+            {live.reason}{live.since ? ` · since ${kuwaitHHMM(live.since)} Kuwait` : ""}{writesBlocked ? " · writes disabled" : ""}
           </span>
+        </div>
+      )}
+      {live.mode === "closed" && (
+        <div className="session-banner session-info" id="closed-banner" role="status" data-live="closed">
+          <span className="session-banner-pip" />
+          <span className="session-banner-title">SESSION CLOSED</span>
+          <span className="session-banner-why">{live.reason} — the ticker idles until 08:45; the graded board arrives after stats:daily</span>
         </div>
       )}
 
@@ -327,13 +332,13 @@ export default function App() {
               <ErrorBoundary name="CHART"><CandleChart symbol={curSymbol} date={reviewMode ? selectedDate : null} /></ErrorBoundary>
             )}
             <div id="panel">
-              {tab === "BOOKS" ? <ErrorBoundary name="BOOKS"><BooksView /></ErrorBoundary>
+              {tab === "BOOKS" ? <ErrorBoundary name="BOOKS"><BooksView writesBlocked={writesBlocked} /></ErrorBoundary>
                 : tab === "STATES" ? <ErrorBoundary name="STATES"><StatesView /></ErrorBoundary>
                 : curSymbol ? (
                   <ErrorBoundary name={curSymbol} onReset={detail.refresh}>
                     <StockDetail symbol={curSymbol} detail={detail.data} error={detail.error} loading={detail.loading}
-                      detailAt={detail.at} bookAt={detail.bookAt} connected={board.connected}
-                      stops={board.data?.stops ?? session.data?.stops ?? null} readOnly={reviewMode}
+                      detailAt={detail.at} bookAt={detail.bookAt} connected={board.connected && !live.dead}
+                      stops={board.data?.stops ?? session.data?.stops ?? null} readOnly={reviewMode || writesBlocked}
                       onChanged={onTradeChanged} onFeed={addFeed} />
                   </ErrorBoundary>
                 ) : reviewMode ? (

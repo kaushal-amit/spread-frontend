@@ -10,31 +10,24 @@
  * renders an empty list as though it were an answer.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { io, Socket } from "socket.io-client";
-import { apiGet, ApiError, socketOptions, socketUrl } from "./client";
-import { POLL_MS, BACKOFF, DEBOUNCE_MS } from "../config/endpoints";
+import { apiGet, ApiError } from "./client";
+import { BACKOFF, DEBOUNCE_MS } from "../config/endpoints";
 import type { AccountState, BoardUpdate, Budget, MarketDay, SessionInfo, StockCandidate, TradingContract, Detail, AlertMsg, EntryAlertMsg, StrandedMsg, WakeupMsg, HaltMsg, SlotStaleMsg, FeedServerEvent, FeedHealth, Candles } from "./types";
 import { kuwaitHHMM } from "../lib/time";
 import { requestNotifyOnce, pushNotification, beep } from "../lib/notify";
-
-// ─── the shared socket ─────────────────────────────────────────────────────
-let shared: Socket | null = null;
-export function getSocket(): Socket {
-  if (!shared) {
-    shared = io(socketUrl, socketOptions());
-    // D3 · a server-side disconnect (the token's exp, after spread:reauth) is
-    // "io server disconnect", which socket.io-client does NOT retry on its own.
-    // Reconnect explicitly: the auth function presents a fresh token.
-    const s = shared;
-    s.on("disconnect", (reason: string) => { if (reason === "io server disconnect") setTimeout(() => s.connect(), 250); });
-  }
-  return shared;
-}
+import { getSocket } from "./socket";
+import { useSnapshotState, isSectionError, bootstrap, type Section } from "./snapshot";
+export { getSocket } from "./socket";
 
 export interface Live<T> { data: T | null; error: ApiError | Error | null; loading: boolean; at: number | null; refresh: () => void }
 
 /**
- * Poll a GET on an interval, and again (debounced) whenever `signal` changes.
+ * An ON-DEMAND read (the socket plan): fetched when its inputs change and,
+ * debounced, whenever `signal` changes. With everyMs <= 0 (the default now)
+ * there is NO timer — nothing on the terminal polls; the remaining callers
+ * are the candle grain, the session list and a review day, re-read when a
+ * snapshot says something moved. everyMs > 0 keeps the old self-scheduling
+ * poll for a caller that explicitly wants one (none today; a test asserts it).
  *
  * Correctness under real conditions is the point here, not just "fetch on a
  * timer". Three hazards a naive version has, and how this avoids them:
@@ -53,7 +46,7 @@ export interface Live<T> { data: T | null; error: ApiError | Error | null; loadi
  *    and a new request aborts any in-flight one — at most one request per hook
  *    is ever open.
  */
-function usePolled<T>(path: string, everyMs: number, signal: unknown = null, params?: Record<string, string | number | undefined>, enabled = true): Live<T> {
+function usePolled<T>(path: string, everyMs: number = 0, signal: unknown = null, params?: Record<string, string | number | undefined>, enabled = true): Live<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | Error | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +90,7 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
     const run = () => {
       refresh().finally(() => {
         if (gen.current !== myGen) return;
-        timer = setTimeout(run, delay());
+        if (everyMs > 0) timer = setTimeout(run, delay());   // on demand: no timer
       });
     };
     // A signal-driven refetch RESTARTS the poll clock instead of adding to it.
@@ -122,7 +115,7 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
   useEffect(() => {
     if (signal == null || signal === 0) return;
     const t = setTimeout(() => {
-      if (Date.now() - lastFetchAt.current < everyMs / 2) return;
+      if (everyMs > 0 && Date.now() - lastFetchAt.current < everyMs / 2) return;
       reschedule.current?.();
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -131,9 +124,33 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
   return { data, error, loading, at, refresh };
 }
 
+// ─── sections of the snapshot, as Live<T> ────────────────────────────────────
+/**
+ * One section of the server's snapshot as the Live<T> shape the components
+ * already render: data (null while a section is broken), error (the server's
+ * per-section error, as an ApiError), loading (no snapshot yet), at (when the
+ * section last arrived), refresh (a bootstrap — the same object, on demand).
+ */
+function useSection<T>(name: Section): Live<T> {
+  const st = useSnapshotState();
+  const raw = st.sections[name];
+  const broken = isSectionError(raw);
+  const data = raw === undefined || broken ? null : (raw as T);
+  const error: ApiError | Error | null = broken
+    ? new ApiError(503, raw.error.code || "SECTION_FAILED", raw.error.error || `${name} could not be built`)
+    : (raw === undefined && st.bootstrapError) ? st.bootstrapError : null;
+  return { data, error, loading: raw === undefined && !st.bootstrapError && (st.bootstrapping || st.lastSnapshotAt == null),
+    at: st.sectionAt[name] ?? null, refresh: () => { bootstrap("refresh"); } };
+}
+
 // ─── the board ─────────────────────────────────────────────────────────────
 export interface Board {
-  recommended: StockCandidate[]; nearMiss: StockCandidate[]; rejected: StockCandidate[];
+  // CR-8 · the four verdict buckets + NOT COMPUTED; `all` is their concatenation
+  // and equals counts.universe — or the server said UNIVERSE_MISMATCH.
+  take: StockCandidate[]; oneAway: StockCandidate[]; priceWarn: StockCandidate[]; leave: StockCandidate[];
+  /** @deprecated = take */ recommended: StockCandidate[];
+  /** @deprecated = oneAway */ nearMiss: StockCandidate[];
+  /** @deprecated = priceWarn + leave */ rejected: StockCandidate[];
   // SPR-38 · NOT COMPUTED is its own bucket, never counted as rejected.
   notComputed: StockCandidate[];
   all: StockCandidate[]; counts: Record<string, number>; tradingDay: string | null; budgetKd: number | null;
@@ -141,100 +158,38 @@ export interface Board {
 }
 
 export function useBoard(): Live<Board> & { connected: boolean; tick: number; disconnectedSince: number | null } {
-  const [data, setData] = useState<Board | null>(null);
-  const [error, setError] = useState<ApiError | Error | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [at, setAt] = useState<number | null>(null);
-  const [connected, setConnected] = useState(false);
-  // SPR-33 · when the push channel dropped, so the UI can say "since HH:MM"
-  // instead of leaving a stale board looking live.
-  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
-  const [tick, setTick] = useState(0);
-
-  const fromUpdate = (u: BoardUpdate): Board => {
+  const st = useSnapshotState();
+  const base = useSection<BoardUpdate>("board");
+  const u = base.data;
+  // §0 · a board the server could not compute arrives with `error` set and
+  // empty buckets — the state line reads BOARD UNAVAILABLE, never a quiet
+  // "0 symbols · nothing passes every gate".
+  const boardError = u?.error ? new ApiError(503, u.error.code || "BOARD_FAILED", u.error.error || "the board could not be computed") : base.error;
+  const data: Board | null = u ? (() => {
     const notComputed = u.notComputed ?? [];
+    // CR-8 · read the buckets; a pre-CR-8 server (one release) sends only the
+    // old names — split them by `bucket` when present, else by status.
+    const take = u.take ?? u.recommended;
+    const oneAway = u.oneAway ?? u.nearMiss;
+    const priceWarn = u.priceWarn ?? u.rejected.filter((r) => r.bucket === "PRICE_WARN" || r.status === "price_warn");
+    const leave = u.leave ?? u.rejected.filter((r) => !(r.bucket === "PRICE_WARN" || r.status === "price_warn"));
     return {
-      recommended: u.recommended, nearMiss: u.nearMiss, rejected: u.rejected, notComputed,
-      all: [...u.recommended, ...u.nearMiss, ...u.rejected, ...notComputed],
+      take, oneAway, priceWarn, leave, notComputed,
+      recommended: take, nearMiss: oneAway, rejected: [...priceWarn, ...leave],
+      all: [...take, ...oneAway, ...priceWarn, ...leave, ...notComputed],
       counts: u.counts, tradingDay: u.tradingDay, budgetKd: u.budgetKd, reach: u.reach, stops: u.stops ?? null,
     };
-  };
-
-  // Once the socket has delivered a board it is the authoritative source — the
-  // REST seed carries no counts/reach/stops and must never overwrite it (doing so
-  // blanked the session-banner STOP line after a trade, when board.refresh() was
-  // called while the socket was live). The seed exists only for the first paint
-  // and as the fallback when the push channel is down.
-  const socketSeeded = useRef(false);
-  const seedCtrl = useRef<AbortController | null>(null);
-
-  const refresh = useCallback(() => {
-    if (socketSeeded.current) return;                 // socket is live — it owns the board
-    seedCtrl.current?.abort();
-    const ctrl = new AbortController();
-    seedCtrl.current = ctrl;
-    // REST seed: /stocks is every symbol; split by status.
-    apiGet<StockCandidate[]>("/stocks", undefined, { signal: ctrl.signal })
-      .then((rows) => {
-        if (socketSeeded.current) return;             // a push landed while we were fetching
-        setData({
-          recommended: rows.filter((r) => r.status === "recommended"),
-          nearMiss: rows.filter((r) => r.status === "near_miss"),
-          rejected: rows.filter((r) => r.status === "rejected"),
-          notComputed: rows.filter((r) => r.status === "not_computed"),
-          all: rows, counts: {}, tradingDay: null, budgetKd: null, reach: null, stops: null,
-        });
-        setError(null); setAt(Date.now());
-      })
-      .catch((e) => { if (e?.name !== "AbortError") setError(e); })
-      .finally(() => { setLoading(false); if (seedCtrl.current === ctrl) seedCtrl.current = null; });
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const s = getSocket();
-    const onUpdate = (u: BoardUpdate) => {
-      socketSeeded.current = true;
-      setData(fromUpdate(u));
-      // §0 · a board the server could not compute arrives with `error` set and
-      // empty buckets. Surfaced as the board error so the state line reads
-      // BOARD UNAVAILABLE — not "0 symbols · live · nothing passes every gate".
-      setError(u.error ? new ApiError(503, u.error.code || "BOARD_FAILED", u.error.error || "the board could not be computed") : null);
-      setAt(Date.now()); setLoading(false); setTick((t) => t + 1);
-    };
-    const onErr = (e: any) => setError(new ApiError(0, e?.data?.code || "SOCKET", e?.message || "socket error"));
-    const onConnect = () => { setConnected(true); setDisconnectedSince(null); };
-    const onDisconnect = () => {
-      // The push channel dropped; the socket no longer owns the board, so the REST
-      // seed is allowed to fill the gap again until the socket re-delivers.
-      socketSeeded.current = false;
-      setConnected(false); setDisconnectedSince((prev) => prev ?? Date.now());
-    };
-    const onSpreadErr = (e: any) => setError(new ApiError(400, e.code, e.error));
-    s.on("connect", onConnect);
-    s.on("disconnect", onDisconnect);
-    s.on("connect_error", onErr);
-    s.on("spread:update", onUpdate);
-    s.on("spread:error", onSpreadErr);
-    if (s.connected) setConnected(true);
-    // Not connected on mount and not yet dropped-from-connected: still mark a
-    // start time so a channel that never attaches is visible, not silent.
-    else setDisconnectedSince((prev) => prev ?? Date.now());
-    return () => {
-      // Remove EVERY listener this effect added — the spread:error handler used to
-      // leak (added, never removed), stacking a new one on each re-run.
-      s.off("connect", onConnect); s.off("disconnect", onDisconnect); s.off("connect_error", onErr);
-      s.off("spread:update", onUpdate); s.off("spread:error", onSpreadErr);
-      seedCtrl.current?.abort(); seedCtrl.current = null;
-    };
-  }, [refresh]);
-
-  return { data, error, loading, at, refresh, connected, tick, disconnectedSince };
+  })() : null;
+  // `tick` — a write happened (the last PARTIAL's seq): the detail bundle re-reads on it.
+  return { data, error: boardError, loading: base.loading, at: base.at, refresh: base.refresh,
+    connected: st.connected, tick: st.lastPartialSeq, disconnectedSince: st.disconnectedSince };
 }
 
-export const useAccount = (signal?: unknown) => usePolled<AccountState>("/account", POLL_MS.account, signal);
-export const useBudget = (signal?: unknown) => usePolled<Budget>("/budget", POLL_MS.budget, signal);
-export const useSession = () => usePolled<SessionInfo>("/session", POLL_MS.session);
+// The socket plan · these are SECTIONS of the snapshot. No polling: a write
+// pushes a partial within 5 s, the minute pushes the rest.
+export const useAccount = (_signal?: unknown) => useSection<AccountState>("account");
+export const useBudget = (_signal?: unknown) => useSection<Budget>("budget");
+export const useSession = () => useSection<SessionInfo>("session");
 
 // ─── R-18 · the session picker and review data ──────────────────────────────
 export interface SessionRow {
@@ -246,27 +201,31 @@ export interface ReviewSymbol {
   symbol: string; close_px: number | null; prev_close: number | null; chg_fils: number | null;
   total_volume: number | null; trades: number | null; data_quality: string | null;
 }
-/** The days that traded and may be selected. Rarely changes — poll slowly. */
-export const useSessions = () => usePolled<{ sessions: SessionRow[]; truncated_before_hhmm: number }>("/sessions", POLL_MS.sessions);
-/** The raw symbol_day board for a past session (read-only review). */
+/** The days that traded and may be selected. On demand: once, and again after a final snapshot (a new session recorded). */
+export function useSessions() {
+  const st = useSnapshotState();
+  return usePolled<{ sessions: SessionRow[]; truncated_before_hhmm: number }>("/sessions", 0, st.final ? st.seq : null);
+}
+/** The raw symbol_day board for a past session (read-only review). Once per date. */
 export const useReviewBoard = (date: string | null, enabled: boolean) =>
   usePolled<{ date: string; count: number; symbols: ReviewSymbol[] }>(
-    `/review/session/${date ?? ""}/symbols`, POLL_MS.review, null, undefined, enabled && !!date);
+    `/review/session/${date ?? ""}/symbols`, 0, null, undefined, enabled && !!date);
 /** R-18 · a date is selectable only if it is today or a day that traded. */
 export const isSelectableSession = (date: string, today: string | null, sessionDates: string[]): boolean =>
   date === today || new Set(sessionDates).has(date);
-export const useMarket = () => usePolled<MarketDay>("/market", POLL_MS.market);
-/** C5 · the chart view: /candles/:symbol at the chosen grain, for the FOCUSED symbol only. */
-export const useCandles = (symbol: string | null, minutes: number, date: string | null = null) =>
-  usePolled<Candles>(`/candles/${symbol ?? ""}`, POLL_MS.candles, null,
-    { minutes, date: date ?? undefined }, !!symbol);
-export const useContracts = (signal?: unknown) => usePolled<TradingContract[]>("/trading/contracts", POLL_MS.contracts, signal);
+export const useMarket = () => useSection<MarketDay>("market");
+/** C5 · the chart view: /candles/:symbol at the chosen grain, for the FOCUSED symbol only — re-read on each minute snapshot, never on a timer. */
+export function useCandles(symbol: string | null, minutes: number, date: string | null = null) {
+  const st = useSnapshotState();
+  return usePolled<Candles>(`/candles/${symbol ?? ""}`, 0, st.seq || null, { minutes, date: date ?? undefined }, !!symbol);
+}
+export const useContracts = (_signal?: unknown) => useSection<TradingContract[]>("contracts");
 
 // ─── SPR-30 · the capture-feed roster, so the header can be honest ──────────
 // Polls /feeds and also takes the live `spread:feedHealth` push, so a feed
 // going silent shows within the scan interval without waiting for the poll.
 export function useFeeds(): Live<FeedHealth> {
-  const base = usePolled<FeedHealth>("/feeds", POLL_MS.feeds);
+  const base = useSection<FeedHealth>("feeds");
   const [data, setData] = useState<FeedHealth | null>(null);
   useEffect(() => { setData(base.data); }, [base.data]);
   useEffect(() => {
@@ -295,62 +254,65 @@ export async function fetchFeedHistory(date?: string): Promise<Array<{ id: strin
 // ─── the detail page ───────────────────────────────────────────────────────
 
 /**
- * One symbol's detail bundle, refreshed every 10 s and on each board tick, with
- * the ladder patched live from `spread:book` (the server pushes only WATCHED
- * symbols, so the hook watches on mount and unwatches on leave — C-06).
+ * One symbol's detail bundle — read ONCE per symbol and again after a write
+ * (`tick` = the last partial snapshot's seq) — with the ladder, the quote and
+ * the open contract's marks patched live from `spread:focus`: the server
+ * pushes the FOCUSED symbol every 2 s when something changed. No 10 s poll.
+ * The hook tells the server which symbol it is looking at (`spread:focus`),
+ * clears it on leave, and re-tells it on every (re)connect — the server keeps
+ * the focus per socket.id and a reconnect is a new id.
  */
-export function useDetail(symbol: string | null, tick: number): Live<Detail> & { bookAt: number | null } {
-  const base = usePolled<Detail>(`/stocks/${symbol || "_"}/detail`, POLL_MS.detail, symbol ? tick : null, undefined, !!symbol);
+export interface FocusMsg {
+  symbol: string; at: string;
+  quote: { last: number | null; bid: number | null; bidQty: number | null; offer: number | null; offerQty: number | null; at: string } | null;
+  book: { capturedAt: string | null; b: [number, number, number | null][]; o: [number, number, number | null][] };
+  contract: TradingContract | null;
+}
+export function useDetail(symbol: string | null, tick: number): Live<Detail> & { bookAt: number | null; focusAt: number | null; focus: FocusMsg | null } {
+  const base = usePolled<Detail>(`/stocks/${symbol || "_"}/detail`, 0, symbol ? tick : null, undefined, !!symbol);
   const [data, setData] = useState<Detail | null>(null);
-  // When the ladder was last patched by a push — the stale marker reads this.
+  const [focus, setFocus] = useState<FocusMsg | null>(null);
+  // When the ladder was last patched by a NEW capture — the stale marker reads this.
   const [bookAt, setBookAt] = useState<number | null>(null);
+  const [focusAt, setFocusAt] = useState<number | null>(null);
   const lastCapturedAt = useRef<string | null>(null);
 
   useEffect(() => { setData(base.data); }, [base.data]);
-  useEffect(() => { setBookAt(null); lastCapturedAt.current = null; }, [symbol]);
+  useEffect(() => { setBookAt(null); setFocusAt(null); setFocus(null); lastCapturedAt.current = null; }, [symbol]);
 
   useEffect(() => {
-    if (!symbol) return;
+    if (!symbol) { getSocket().emit("spread:focus", { symbol: null }); return; }
     const s = getSocket();
     const sym = symbol.toUpperCase();
-    s.emit("spread:watch", { symbol: sym });
-    const onBook = (msg: any) => {
+    s.emit("spread:focus", { symbol: sym });
+    const onFocus = (msg: FocusMsg) => {
       // 4.4 · only THIS symbol's slice; every other push is ignored here.
-      if (msg?.symbol !== sym || !msg.book) return;
-      // bookAt is "when did a NEW capture arrive", not "when did the server
-      // last repeat itself". The server re-sends the latest capture for every
-      // watched symbol on every 15 s tick, so stamping every push kept the
-      // push age under the stale threshold for ever and the ladder never read
-      // STALE while the socket was up — even on a capture hours old. Only a
-      // changed capturedAt moves the clock; a push with no capture instant
-      // (an empty book) moves nothing.
-      const cap = msg.book.capturedAt ?? null;
-      // A symbol outside the depth sweep is pushed as {capturedAt:null, b:[], o:[]}
-      // every tick; replacing the REST one-level touch ladder with that empty
-      // book made the ladder flicker blank/back every 15 s. Nothing captured,
-      // nothing to replace.
-      if (cap == null && !(msg.book.b || []).length && !(msg.book.o || []).length) return;
+      if (msg?.symbol !== sym) return;
+      setFocus(msg); setFocusAt(Date.now());
+      const book = msg.book;
+      // bookAt is "when did a NEW capture arrive". Only a changed capturedAt
+      // moves the clock; a push with no capture instant (an empty book) moves
+      // nothing and does not replace the REST touch ladder.
+      const cap = book?.capturedAt ?? null;
+      if (!book || (cap == null && !(book.b || []).length && !(book.o || []).length)) return;
       if (cap != null && cap !== lastCapturedAt.current) { lastCapturedAt.current = cap; setBookAt(Date.now()); }
       setData((prev) => prev && prev.orderBook ? {
         ...prev,
         orderBook: {
           ...prev.orderBook,
-          bids: (msg.book.b || []).map((l: any[]) => ({ price: Number(l[0]), qty: Number(l[1]), changed: "same" as const })),
-          offers: (msg.book.o || []).map((l: any[]) => ({ price: Number(l[0]), qty: Number(l[1]), changed: "same" as const })),
-          lastTickTime: msg.book.capturedAt || prev.orderBook.lastTickTime,
+          bids: (book.b || []).map((l) => ({ price: Number(l[0]), qty: Number(l[1]), changed: "same" as const })),
+          offers: (book.o || []).map((l) => ({ price: Number(l[0]), qty: Number(l[1]), changed: "same" as const })),
+          lastTickTime: cap || prev.orderBook.lastTickTime,
         },
       } : prev);
     };
-    s.on("spread:book", onBook);
-    // The server keeps watches per socket.id and drops them on disconnect. A
-    // reconnect is a new id with an empty set — without re-watching, the
-    // ladder got no pushes after any reconnect until the view was remounted.
-    const onReconnect = () => s.emit("spread:watch", { symbol: sym });
+    s.on("spread:focus", onFocus);
+    const onReconnect = () => s.emit("spread:focus", { symbol: sym });
     s.on("connect", onReconnect);
-    return () => { s.off("spread:book", onBook); s.off("connect", onReconnect); s.emit("spread:unwatch", { symbol: sym }); };
+    return () => { s.off("spread:focus", onFocus); s.off("connect", onReconnect); s.emit("spread:focus", { symbol: null }); };
   }, [symbol]);
 
-  return { ...base, data: symbol ? data : null, bookAt };
+  return { ...base, data: symbol ? data : null, bookAt, focusAt, focus };
 }
 
 /** Every alert the server pushes, as feed events. */

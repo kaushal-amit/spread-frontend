@@ -33,7 +33,8 @@ const tapeCell = (s: StockCandidate) =>
  */
 export const SCREENER_FILTERS: ScreenerFilterDef[] = [
   { key: "ALL", label: "ALL", predicate: () => true },
-  { key: "PASSES", label: "PASSES EVERY GATE", predicate: (s) => s.status === "recommended" },
+  // CR-8 · TAKE is the bucket; `status === "recommended"` is its one-release shadow.
+  { key: "PASSES", label: "PASSES EVERY GATE", predicate: (s) => (s.bucket ? s.bucket === "TAKE" : s.status === "recommended") },
   {
     key: "REACHABLE", label: "REACHABLE",
     labelFor: (b) => `REACHABLE AT ${b == null ? "—" : Math.round(b)} KD`,

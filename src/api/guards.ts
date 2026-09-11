@@ -39,6 +39,8 @@ export const SHAPES = {
     notComputed: "array", gateStatsSource: "string?",
     // The screener facts (present.js): booleans the server measured, null when it did not.
     everTraded: "boolean?", bookCapturedToday: "boolean?",
+    // CR-8
+    bucket: "string", structuralReason: "string?", noRow: "boolean", lastRowDay: "string?",
   },
   TradingContract: {
     symbol: "string", seq: "number", state: "string", shares: "number", entry: "number?", bid: "number?", offer: "number?",

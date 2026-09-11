@@ -31,6 +31,8 @@ interface TopBarProps {
   feeds: Live<FeedHealth>;
   errors: string[];
   connected: boolean;
+  /** The socket plan · the liveness verdict (api/snapshot.ts) — drives the mode pill. */
+  liveMode?: "live" | "dead" | "stale" | "closed" | "disconnected" | "connecting";
   onBudgetSaved: () => void;
   /** The server's session day; null until /api/session has answered. */
   selectedDate: string | null;
@@ -55,7 +57,7 @@ const staleTitle = <T,>(h: Live<T>) => (h.error && h.data ? `STALE — last refr
 
 export const TopBar: React.FC<TopBarProps> = ({
   account: accountLive, budget: budgetLive, session: sessionLive, market: marketLive, contracts: contractsLive,
-  feeds: feedsLive, errors, connected, onBudgetSaved, selectedDate, onDateChange, minDate, maxDate, onToggleAdd,
+  feeds: feedsLive, errors, connected, liveMode, onBudgetSaved, selectedDate, onDateChange, minDate, maxDate, onToggleAdd,
   viewMode = "split", onViewModeChange, isFullscreen = false, onToggleFullscreen,
 }) => {
   const account = accountLive.data, budget = budgetLive.data, session = sessionLive.data,
@@ -157,6 +159,12 @@ export const TopBar: React.FC<TopBarProps> = ({
     // session — a dropped socket must not keep the pill lit green.
     modeClass = session.open ? (connected ? "live" : "past") : session.phase === "pre_open" ? "plan" : "past";
   }
+  // The socket plan · the pill never reads LIVE on a dead or stale ticker, and
+  // reads CLOSED after the final snapshot — the heartbeat decides, not the clock.
+  if (liveMode === "dead") { modeText = "TICKER DEAD"; modeClass = "dead"; }
+  else if (liveMode === "stale") { modeText = "STALE"; modeClass = "past"; }
+  else if (liveMode === "disconnected") { modeText = "NOT LIVE"; modeClass = "past"; }
+  else if (liveMode === "closed") { modeText = "CLOSED"; modeClass = "past"; }
 
   return (
     <div className="bar">

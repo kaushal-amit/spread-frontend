@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { BookTile } from "./BookTile";
 import { useLiveBooks } from "./useLiveBooks";
-import { useSession } from "../api/hooks";
+import { useSession, useBoard, useContracts } from "../api/hooks";
 import type { StockCandidate, TradingContract } from "../api/types";
-import { getBoard, getContracts } from "./api";
 
 /**
  * ─── THE 20-MINUTE CLOCK ───────────────────────────────────────────────────
@@ -39,7 +38,7 @@ const Clock: React.FC<{ openedAt: string; symbol: string }> = ({ openedAt, symbo
   );
 };
 
-export const BooksView: React.FC = () => {
+export const BooksView: React.FC<{ writesBlocked?: boolean }> = ({ writesBlocked = false }) => {
   const { slots, slotCount, books, connected, error, reloadSlots } = useLiveBooks();
   // R-11 · the scraper's capture interval, from the server; tiles read stale from it.
   const captureIntervalSecs = useSession().data?.captureIntervalSecs;
@@ -47,22 +46,15 @@ export const BooksView: React.FC = () => {
   // own book or this tick changes.
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(t); }, []);
-  const [movers, setMovers] = useState<StockCandidate[]>([]);
-  const [open, setOpen] = useState<TradingContract[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [boardLoaded, setBoardLoaded] = useState(false);
-
-  useEffect(() => {
-    // C-07 · typed, and a failure is SHOWN. `.catch(() => {})` made a 401 or a
-    // 500 look like "nothing ranked yet".
-    const load = () => {
-      getBoard().then((b) => { setMovers(b); setLoadError(null); setBoardLoaded(true); }).catch((e) => setLoadError(e.message));
-      getContracts().then((c) => setOpen(c)).catch((e) => setLoadError(e.message));
-    };
-    load();
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
-  }, []);
+  // The socket plan · the movers and the open positions are SECTIONS of the
+  // snapshot (the board and the contracts) — the 30 s loop this view ran on its
+  // own is gone; a trade pushes the contracts as a partial within 5 s.
+  const boardLive = useBoard();
+  const contractsLive = useContracts();
+  const movers: StockCandidate[] = boardLive.data?.all ?? [];
+  const open: TradingContract[] = contractsLive.data ?? [];
+  const loadError: string | null = boardLive.error?.message ?? contractsLive.error?.message ?? null;
+  const boardLoaded = !!boardLive.data;
 
   const slotted = new Set(slots.map((s) => s.symbol));
   // B5 · one chip per slot the scraper HAS (slotCount), the held ones as tiles
@@ -99,7 +91,7 @@ export const BooksView: React.FC = () => {
       <div className="books-grid">
         {slots.length === 0 && !error && <div className="book-dim">{connected ? "no depth slots configured — the scraper's /ingest/depth-symbols returned none" : "waiting for the slot list…"}</div>}
         {slots.map((s) => (
-          <BookTile key={s.slot} slot={s} book={books[s.symbol]} onSwapped={reloadSlots} connected={connected} now={now} captureIntervalSecs={captureIntervalSecs} />
+          <BookTile key={s.slot} slot={s} book={books[s.symbol]} onSwapped={reloadSlots} connected={connected && !writesBlocked} writesBlocked={writesBlocked} now={now} captureIntervalSecs={captureIntervalSecs} />
         ))}
         {free.map((n) => (
           <div key={`free-${n}`} className="book-tile book-free" data-slot={n}>

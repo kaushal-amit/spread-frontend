@@ -2431,3 +2431,14 @@ body {
 .auth-btn:disabled { opacity: .6; cursor: default; }
 .auth-who { position: fixed; right: 10px; bottom: 8px; font-size: 10.5px; color: var(--dimmer); display: flex; gap: 8px; z-index: 5; }
 .auth-link { background: transparent; border: 0; color: var(--dim); cursor: pointer; text-decoration: underline; font-size: 10.5px; padding: 0; }
+
+/* CR-8 · the LEAVE fold and the PRICE WARN card */
+.pl.fold { text-align: left; background: transparent; border: 1px dashed var(--line); color: var(--dim); cursor: pointer; width: 100%; font: inherit; }
+.pl.fold:hover { color: var(--txt); }
+.pl.structural { opacity: .75; }
+.pl.pw .w { color: var(--wait); }
+
+/* the socket plan · liveness */
+.session-banner.session-info { border-color: var(--line); }
+.session-banner.session-info .session-banner-pip { background: var(--dim); }
+.bar .mode.dead { background: var(--stop); color: #1a0f0d; animation: none; }
