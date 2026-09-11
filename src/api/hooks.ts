@@ -55,6 +55,8 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
   const gen = useRef(0);                              // bumped on every param change / unmount
   const inflight = useRef<AbortController | null>(null);
   const fails = useRef(0);
+  const lastFetchAt = useRef(0);                      // when the last request was STARTED
+  const reschedule = useRef<(() => void) | null>(null); // restart the poll timer from now
 
   const refresh = useCallback((): Promise<void> => {
     if (!enabled) { setData(null); setLoading(false); return Promise.resolve(); }
@@ -62,6 +64,7 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
     const ctrl = new AbortController();
     inflight.current = ctrl;
     const myGen = gen.current;
+    lastFetchAt.current = Date.now();
     return apiGet<T>(path, params, { signal: ctrl.signal })
       .then((d) => { if (gen.current !== myGen) return; setData(d); setError(null); setAt(Date.now()); fails.current = 0; })
       .catch((e) => { if (e?.name === "AbortError" || gen.current !== myGen) return; setError(e); fails.current = Math.min(fails.current + 1, BACKOFF.maxFails); })
@@ -77,28 +80,46 @@ function usePolled<T>(path: string, everyMs: number, signal: unknown = null, par
     gen.current += 1;
     const myGen = gen.current;
     setData(null);
+    // …and the previous resource's error and timestamp: opening symbol B after
+    // symbol A failed showed UNAVAILABLE with A's error while B was loading.
+    setError(null); setAt(null);
     setLoading(true);
     fails.current = 0;
     let timer: ReturnType<typeof setTimeout>;
+    const delay = () => everyMs * Math.pow(BACKOFF.factor, Math.min(fails.current, BACKOFF.maxDoublings));
     const run = () => {
       refresh().finally(() => {
         if (gen.current !== myGen) return;
-        timer = setTimeout(run, everyMs * Math.pow(BACKOFF.factor, Math.min(fails.current, BACKOFF.maxDoublings)));
+        timer = setTimeout(run, delay());
       });
     };
+    // A signal-driven refetch RESTARTS the poll clock instead of adding to it.
+    reschedule.current = () => {
+      if (gen.current !== myGen) return;
+      clearTimeout(timer);
+      run();
+    };
     run();
-    return () => { gen.current += 1; clearTimeout(timer); inflight.current?.abort(); inflight.current = null; };
+    return () => { gen.current += 1; clearTimeout(timer); reschedule.current = null; inflight.current?.abort(); inflight.current = null; };
   }, [refresh, everyMs]);
 
-  // Coalesce signal-driven refetches. board.tick fires on every push (~1/s in an
-  // active market); a refetch per tick multiplied REST load several-fold exactly
-  // when the backend was busiest. Debounce to ONE refetch shortly after the last
-  // tick — this is a background refresh, so it does NOT clear data or show loading.
+  // Signal-driven refetches (board.tick, every spread:update) — COALESCED, not
+  // ADDED. The debounce alone did nothing at the 15 s tick cadence: every tick
+  // still re-fired /account, /budget, /trading/contracts and the detail bundle
+  // on top of their own polls, which is the frontend's share of the backend
+  // OOM. Now a tick only refetches when the last fetch is older than half the
+  // poll interval, and when it does it restarts the poll timer, so the cadence
+  // is min(everyMs, ticks) — never their sum. The first signal (mount, tick 0)
+  // is ignored: the mount poll is already in flight. A background refresh —
+  // never clears data or shows loading.
   useEffect(() => {
-    if (signal == null) return;
-    const t = setTimeout(() => { refresh(); }, DEBOUNCE_MS);
+    if (signal == null || signal === 0) return;
+    const t = setTimeout(() => {
+      if (Date.now() - lastFetchAt.current < everyMs / 2) return;
+      reschedule.current?.();
+    }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [signal, refresh]);
+  }, [signal, everyMs]);
 
   return { data, error, loading, at, refresh };
 }
@@ -165,7 +186,15 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number; di
   useEffect(() => {
     refresh();
     const s = getSocket();
-    const onUpdate = (u: BoardUpdate) => { socketSeeded.current = true; setData(fromUpdate(u)); setError(null); setAt(Date.now()); setLoading(false); setTick((t) => t + 1); };
+    const onUpdate = (u: BoardUpdate) => {
+      socketSeeded.current = true;
+      setData(fromUpdate(u));
+      // §0 · a board the server could not compute arrives with `error` set and
+      // empty buckets. Surfaced as the board error so the state line reads
+      // BOARD UNAVAILABLE — not "0 symbols · live · nothing passes every gate".
+      setError(u.error ? new ApiError(503, u.error.code || "BOARD_FAILED", u.error.error || "the board could not be computed") : null);
+      setAt(Date.now()); setLoading(false); setTick((t) => t + 1);
+    };
     const onErr = (e: any) => setError(new ApiError(0, e?.data?.code || "SOCKET", e?.message || "socket error"));
     const onConnect = () => { setConnected(true); setDisconnectedSince(null); };
     const onDisconnect = () => {
@@ -264,9 +293,10 @@ export function useDetail(symbol: string | null, tick: number): Live<Detail> & {
   const [data, setData] = useState<Detail | null>(null);
   // When the ladder was last patched by a push — the stale marker reads this.
   const [bookAt, setBookAt] = useState<number | null>(null);
+  const lastCapturedAt = useRef<string | null>(null);
 
   useEffect(() => { setData(base.data); }, [base.data]);
-  useEffect(() => { setBookAt(null); }, [symbol]);
+  useEffect(() => { setBookAt(null); lastCapturedAt.current = null; }, [symbol]);
 
   useEffect(() => {
     if (!symbol) return;
@@ -276,7 +306,20 @@ export function useDetail(symbol: string | null, tick: number): Live<Detail> & {
     const onBook = (msg: any) => {
       // 4.4 · only THIS symbol's slice; every other push is ignored here.
       if (msg?.symbol !== sym || !msg.book) return;
-      setBookAt(Date.now());
+      // bookAt is "when did a NEW capture arrive", not "when did the server
+      // last repeat itself". The server re-sends the latest capture for every
+      // watched symbol on every 15 s tick, so stamping every push kept the
+      // push age under the stale threshold for ever and the ladder never read
+      // STALE while the socket was up — even on a capture hours old. Only a
+      // changed capturedAt moves the clock; a push with no capture instant
+      // (an empty book) moves nothing.
+      const cap = msg.book.capturedAt ?? null;
+      // A symbol outside the depth sweep is pushed as {capturedAt:null, b:[], o:[]}
+      // every tick; replacing the REST one-level touch ladder with that empty
+      // book made the ladder flicker blank/back every 15 s. Nothing captured,
+      // nothing to replace.
+      if (cap == null && !(msg.book.b || []).length && !(msg.book.o || []).length) return;
+      if (cap != null && cap !== lastCapturedAt.current) { lastCapturedAt.current = cap; setBookAt(Date.now()); }
       setData((prev) => prev && prev.orderBook ? {
         ...prev,
         orderBook: {
@@ -288,7 +331,12 @@ export function useDetail(symbol: string | null, tick: number): Live<Detail> & {
       } : prev);
     };
     s.on("spread:book", onBook);
-    return () => { s.off("spread:book", onBook); s.emit("spread:unwatch", { symbol: sym }); };
+    // The server keeps watches per socket.id and drops them on disconnect. A
+    // reconnect is a new id with an empty set — without re-watching, the
+    // ladder got no pushes after any reconnect until the view was remounted.
+    const onReconnect = () => s.emit("spread:watch", { symbol: sym });
+    s.on("connect", onReconnect);
+    return () => { s.off("spread:book", onBook); s.off("connect", onReconnect); s.emit("spread:unwatch", { symbol: sym }); };
   }, [symbol]);
 
   return { ...base, data: symbol ? data : null, bookAt };
@@ -344,7 +392,7 @@ export function useAlerts(onAlert: (e: { s: string; k: string; c: string; p: str
     };
     // A4 · a depth slot whose capture has gone stale during the session.
     const slotStale = (m: SlotStaleMsg) => onAlert({ s: m.symbol, k: `SLOT ${m.slot} STALE`, c: "warn",
-      p: `No depth capture recently${m.lastCaptureAt ? ` — last ${new Date(m.lastCaptureAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}. Its ladder is a stale picture; it will be displaced first.`, u: 1 });
+      p: `No depth capture recently${m.lastCaptureAt ? ` — last ${kuwaitHHMM(m.lastCaptureAt)} Kuwait` : ""}. Its ladder is a stale picture; it will be displaced first.`, u: 1 });
     requestNotifyOnce();
     s.on("spread:alert", alert); s.on("spread:entryAlert", entry); s.on("spread:stranded", stranded); s.on("spread:wakeup", wake); s.on("spread:halt", halt); s.on("spread:slotStale", slotStale);
     return () => { s.off("spread:alert", alert); s.off("spread:entryAlert", entry); s.off("spread:stranded", stranded); s.off("spread:wakeup", wake); s.off("spread:halt", halt); s.off("spread:slotStale", slotStale); };

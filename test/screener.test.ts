@@ -94,7 +94,32 @@ describe("screener · the columns (C2)", () => {
     expect(by.mv).toBe("12");
     expect(by.up2).toBe("6");
     expect(by.exit).toBe("40%");
-    expect(by["net/fil"]).toBe("4.000");
+    expect(by["gross/fil"]).toBe("4.000");
     expect(by.reach).toBe("2×");
+  });
+
+  it("an uncomputed statistic prints '—', never a zero (0 is a measurement)", () => {
+    const c = cand();
+    const nc = {
+      ...c, price: null, changeFils: null, headroom: { ...c.headroom, headroomX: null },
+      metrics: { ...c.metrics, tapeQualityPct: null, movesPerDay: null, moves2PlusPerDay: null,
+        volSpikeRatio: null, postablePct: null, exitDepthPct: null, netPerFilKd: null, consistencyDays: null },
+    } as unknown as StockCandidate;
+    const by = Object.fromEntries(screenerColumns(nc).map((x) => [x.k, x.v]));
+    for (const k of ["px", "1d", "tiny", "mv", "up2", "vol", "post", "exit", "gross/fil", "reach"]) expect(by[k]).toBe("—");
+    // a MEASURED zero still prints 0
+    const zero = { ...c, changeFils: 0, metrics: { ...c.metrics, movesPerDay: 0 } } as StockCandidate;
+    const bz = Object.fromEntries(screenerColumns(zero).map((x) => [x.k, x.v]));
+    expect(bz.mv).toBe("0");
+    expect(bz["1d"]).toBe("+0");
+    // and the 1d change is whole fils (SPR-39)
+    expect(Object.fromEntries(screenerColumns({ ...c, changeFils: 0.8999999 } as StockCandidate).map((x) => [x.k, x.v]))["1d"]).toBe("+1");
+  });
+
+  it("NEVER TRADED matches a measured 0, not an uncomputed null", () => {
+    const c = cand();
+    const nt = screenerDef("NEVER_TRADED").predicate;
+    expect(nt({ ...c, metrics: { ...c.metrics, consistencyDays: 0 } } as StockCandidate)).toBe(true);
+    expect(nt({ ...c, metrics: { ...c.metrics, consistencyDays: null } } as unknown as StockCandidate)).toBe(false);
   });
 });

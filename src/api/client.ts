@@ -15,8 +15,20 @@ export class ApiError extends Error {
   }
 }
 
-export const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '';
-export const API_TOKEN: string | null = (import.meta.env.VITE_SPREAD_API_TOKEN as string | undefined) || null;
+const trimBase = (v: unknown): string => (typeof v === 'string' ? v.trim().replace(/\/$/, '') : '');
+
+export const API_BASE: string = trimBase(import.meta.env.VITE_API_BASE);
+export const API_TOKEN: string | null = (import.meta.env.VITE_SPREAD_API_TOKEN as string | undefined)?.trim() || null;
+
+/**
+ * The scraper's ingest token is a SEPARATE secret (VITE_INGEST_TOKEN). The
+ * backend token used to be sent to the scraper as well, which meant one value
+ * — compiled into this public bundle — could also write orders, quotes and
+ * depth and swap the slots on the scraper. With no VITE_INGEST_TOKEN the
+ * scraper calls carry no token and answer 401, which BOOKS shows as an error:
+ * loud, never a silent fallback to the backend token.
+ */
+export const INGEST_TOKEN: string | null = (import.meta.env.VITE_INGEST_TOKEN as string | undefined)?.trim() || null;
 
 /**
  * The scraper owns /ingest (capture config + the depth slots); the backend owns
@@ -26,8 +38,7 @@ export const API_TOKEN: string | null = (import.meta.env.VITE_SPREAD_API_TOKEN a
  * "book" reads as a null response. Defaults to VITE_INGEST_BASE, then API_BASE
  * (when the backend reverse-proxies /ingest), then same-origin.
  */
-export const INGEST_BASE: string =
-  (import.meta.env.VITE_INGEST_BASE as string | undefined)?.replace(/\/$/, '') ?? API_BASE;
+export const INGEST_BASE: string = trimBase(import.meta.env.VITE_INGEST_BASE) || API_BASE;
 
 /**
  * D2 · fail LOUD when a production build has no backend base. The silent
@@ -39,7 +50,9 @@ export const INGEST_BASE: string =
 export const configError: string | null =
   import.meta.env.PROD && !API_BASE
     ? 'VITE_API_BASE is not set — this build has no backend URL and is calling its own origin. Rebuild with VITE_API_BASE (and VITE_INGEST_BASE) pointed at the backend/scraper.'
-    : null;
+    : import.meta.env.PROD && !INGEST_TOKEN
+      ? 'VITE_INGEST_TOKEN is not set — BOOKS cannot read the depth slots or swap them (the scraper answers 401). Rebuild with the scraper\'s INGEST_TOKEN.'
+      : null;
 if (configError) console.error('[SPREAD config] ' + configError);
 
 function headers(json = false): Record<string, string> {

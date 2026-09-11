@@ -53,7 +53,13 @@ export function useLiveBooks() {
     // ONE shared socket for the app (api/hooks.ts) — this used to open its own
     // and close it on every tab switch.
     const s = getSocket();
-    const onConnect = () => { setConnected(true); watch([...watched.current]); };
+    // On (re)connect the server's watch set is empty (it is keyed by socket.id):
+    // every slot is re-watched OUTRIGHT. `watch()` diffs against watched.current
+    // and so emitted nothing here — BOOKS went silent after every reconnect.
+    const onConnect = () => {
+      setConnected(true);
+      for (const sym of watched.current) s.emit("spread:watch", { symbol: sym });
+    };
     const onDisconnect = () => setConnected(false);
     s.on("connect", onConnect);
     s.on("disconnect", onDisconnect);

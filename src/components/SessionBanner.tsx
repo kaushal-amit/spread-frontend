@@ -18,6 +18,7 @@
  * it speaks only when the mode restricts trading.
  */
 import type { SessionStops } from "../api/types";
+import { kuwaitHHMM } from "../lib/time";
 
 const COPY: Record<string, { cls: string; title: string }> = {
   stop:    { cls: "danger",  title: "STOP — the day is over for new positions" },
@@ -28,7 +29,18 @@ const COPY: Record<string, { cls: string; title: string }> = {
 };
 
 export function SessionBanner({ stops }: { stops: SessionStops | null | undefined }) {
-  if (!stops) return null;
+  // SPR-33 · no verdict is not a clean verdict. Before the first tick, after a
+  // disconnect, or after a REST seed the stops used to be null and this
+  // rendered NOTHING — on a STOP day the banner vanished right after a trade
+  // and the screen read as tradable. Say UNKNOWN until a verdict arrives.
+  if (!stops) {
+    return (
+      <div className="session-banner session-danger" id="session-banner" data-mode="unknown" role="status">
+        <span className="session-banner-pip" />
+        <b>STOPS UNKNOWN</b> — the session gate has not been read yet (no board tick and no /session answer). Do not open a position until it has.
+      </div>
+    );
+  }
   const restrictive = stops.mode === "stop" || stops.mode === "cooloff" || stops.mode === "careful" || stops.mode === "closed";
   // A mode we don't have copy for that still blocks opening is shown plainly
   // rather than swallowed — never a silent "you may trade" when you may not.
@@ -38,7 +50,7 @@ export function SessionBanner({ stops }: { stops: SessionStops | null | undefine
   const reasons = (stops.reasons && stops.reasons.length ? stops.reasons : [stops.market?.reason].filter(Boolean)) as string[];
   const cap = stops.mode === "careful" && stops.maxTargetTicks != null ? ` — take ${stops.maxTargetTicks} fils` : "";
   const until = stops.mode === "cooloff" && stops.losses?.cooloffUntil
-    ? ` — until ${new Date(stops.losses.cooloffUntil).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "";
+    ? ` — until ${kuwaitHHMM(stops.losses.cooloffUntil)} Kuwait` : "";
 
   return (
     <div className={`session-banner session-${c.cls}`} id="session-banner" role="status">

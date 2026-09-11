@@ -29,7 +29,7 @@ import { BooksView } from "./live/BooksView";
 import "./live/books.css";
 import { FeedSection } from "./components/FeedSection";
 import { AskBar } from "./components/AskBar";
-import { useAccount, useAlerts, useBoard, useBudget, useContracts, useDetail, useMarket, useSession, useSessions, useReviewBoard, useFeeds, fetchFeedHistory, isSelectableSession } from "./api/hooks";
+import { useAccount, useAlerts, useBoard, useBudget, useContracts, useDetail, useMarket, useSession, useSessions, useReviewBoard, useFeeds, fetchFeedHistory, isSelectableSession, getSocket } from "./api/hooks";
 import { configError } from "./api/client";
 import { Columns2, MessageSquare } from "lucide-react";
 
@@ -84,9 +84,22 @@ export default function App() {
   // 4.3 · the session day is the SERVER's (rolls at 04:00 Kuwait). Until
   // /api/session answers there is no date — never the browser's UTC day.
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // Whether the operator PICKED a date (then it sticks) or the screen follows
+  // today. Set once from /session, then it followed nothing: a page left open
+  // across the 04:00 rollover dropped into read-only REVIEW of yesterday.
+  const pickedDate = useRef(false);
   useEffect(() => {
-    if (selectedDate == null && session.data?.kuwaitDay) setSelectedDate(session.data.kuwaitDay);
+    if (pickedDate.current) return;
+    const k = session.data?.kuwaitDay;
+    if (k && k !== selectedDate) setSelectedDate(k);
   }, [session.data, selectedDate]);
+  // The server moves this socket to the new day's room at the rollover and says so.
+  useEffect(() => {
+    const s = getSocket();
+    const onDay = (m: { day?: string }) => { if (m?.day && !pickedDate.current) setSelectedDate(m.day); };
+    s.on("spread:day", onDay);
+    return () => { s.off("spread:day", onDay); };
+  }, []);
 
   // R-18 · the picker is driven by /api/sessions: only days that traded (and
   // today) are selectable, and a past date puts the screen in read-only review.
@@ -95,7 +108,11 @@ export default function App() {
   const reviewMode = !!selectedDate && !!today && selectedDate < today;
   const reviewBoard = useReviewBoard(selectedDate, reviewMode);
   const onDatePicked = useCallback((date: string) => {
-    if (isSelectableSession(date, today, (sessions.data?.sessions ?? []).map((s) => s.date))) { setSelectedDate(date); return; }
+    if (isSelectableSession(date, today, (sessions.data?.sessions ?? []).map((s) => s.date))) {
+      // Picking today again means "follow today"; any other date sticks.
+      pickedDate.current = date !== today;
+      setSelectedDate(date); return;
+    }
     addFeed({ id: `nosession-${date}`, s: "—", k: "NO SESSION", c: "warn", u: 0,
       p: `${date} did not trade — it is not in /api/sessions and cannot be reviewed.` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -264,7 +281,11 @@ export default function App() {
 
       {/* SPR-04/05 · session mode, from the tick — the single source, always
           mounted so it never blinks out on a view switch (SPR-15). */}
-      <SessionBanner stops={board.data?.stops} />
+      {/* The tick carries the authoritative stops; between ticks — before the
+          first one, after a disconnect, or after a REST seed (which carries
+          none) — /session's copy stands in. With neither the banner says
+          UNKNOWN: a missing verdict is never rendered as "you may trade". */}
+      <SessionBanner stops={board.data?.stops ?? session.data?.stops ?? null} />
 
       <SymbolSearch show={showSearch} all={board.data?.all || []}
         onPick={(s) => { openSymbol(s); setShowSearch(false); }} onClose={() => setShowSearch(false)} />
@@ -305,7 +326,7 @@ export default function App() {
                   <ErrorBoundary name={curSymbol} onReset={detail.refresh}>
                     <StockDetail symbol={curSymbol} detail={detail.data} error={detail.error} loading={detail.loading}
                       detailAt={detail.at} bookAt={detail.bookAt} connected={board.connected}
-                      stops={board.data?.stops ?? null} readOnly={reviewMode}
+                      stops={board.data?.stops ?? session.data?.stops ?? null} readOnly={reviewMode}
                       onChanged={onTradeChanged} onFeed={addFeed} />
                   </ErrorBoundary>
                 ) : reviewMode ? (

@@ -2379,3 +2379,34 @@ body {
 
 /* SPR-35 · feed bodies wrap any long token instead of overflowing sideways. */
 .chat-q-body, .chat-a-body, .ev p, .ev .eb { overflow-wrap: anywhere; word-break: break-word; }
+
+/* ── C2 · the dense screener row on a board card, and the C1 filter chips ──
+   `.pl` is a 3-column grid (96px 62px 1fr); a fourth+ child fell into the next
+   row's 96px track by auto-placement, so the eleven-column strip wrapped into a
+   narrow stack. It spans the card instead. */
+.pl .rg { grid-column: 3; }
+.pl .mx {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  color: var(--dimmer);
+  margin-top: 2px;
+}
+.pl .mx .mxc { font-style: normal; white-space: nowrap; }
+.pl .mx .mxc i { font-style: normal; color: var(--dim); opacity: .7; margin-right: 2px; }
+.scrn { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
+.scrn button {
+  font: 11px "IBM Plex Mono", monospace; letter-spacing: .02em;
+  padding: 3px 8px; border-radius: 4px; cursor: pointer;
+  background: rgba(255,255,255,.04); color: var(--dim); border: 1px solid var(--line);
+}
+.scrn button[aria-pressed="true"], .scrn button.on { color: var(--fg, #fff); border-color: var(--go); background: rgba(255,255,255,.08); }
+.scrn-n { font: 11px "IBM Plex Mono", monospace; color: var(--dimmer); }
+.g small.chk { color: var(--dimmer); font-weight: 400; }
+/* CR-7 · a gate without a number is NOT COMPUTED — neutral, never the red of a
+   value that lost. */
+.g.nc::before { background: var(--dimmer); }
+.g.nc { color: var(--dimmer); }

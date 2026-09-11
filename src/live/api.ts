@@ -17,7 +17,7 @@ export interface Book {
 }
 export interface Slot { slot: number; symbol: string; code: string | null; }
 
-import { apiGet, API_TOKEN, INGEST_BASE } from "../api/client";
+import { apiGet, INGEST_BASE, INGEST_TOKEN } from "../api/client";
 import type { StockCandidate, TradingContract } from "../api/types";
 
 /**
@@ -48,7 +48,7 @@ const json = async (r: Response) => {
   }
   return body;
 };
-const scraperHeaders = (): Record<string, string> => (API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {});
+const scraperHeaders = (): Record<string, string> => (INGEST_TOKEN ? { Authorization: `Bearer ${INGEST_TOKEN}` } : {});
 
 /** The five symbols currently swept. Served by the SCRAPER — capture config. */
 export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string }> =>

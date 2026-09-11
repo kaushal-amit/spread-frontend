@@ -4,7 +4,7 @@
  * from stalling a poll loop, an out-of-order response from clobbering fresh
  * state, and a raw fetch message from leaking to the UI.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { apiGet } from "../src/api/client";
 
 const jsonResp = (body: unknown, status = 200) => ({
@@ -56,5 +56,49 @@ describe("client · request controls", () => {
   it("maps a network failure to ApiError 0 NETWORK without leaking the raw message", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch: db-host:5432 secret"))));
     await expect(apiGet("/x")).rejects.toMatchObject({ status: 0, code: "NETWORK", message: "could not reach the server" });
+  });
+});
+
+/**
+ * Two tokens, two services. The backend token used to be sent to the scraper
+ * as well; one value in the public bundle then drove both. The scraper calls
+ * carry VITE_INGEST_TOKEN only — never a fallback to the backend token.
+ */
+describe("client · the scraper token is a separate secret", () => {
+  // client.ts reads import.meta.env at module load: every case needs a fresh module.
+  beforeEach(() => { vi.resetModules(); });
+  afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); vi.unstubAllGlobals(); });
+
+  it("scraper calls send VITE_INGEST_TOKEN, and never VITE_SPREAD_API_TOKEN", async () => {
+    vi.stubEnv("VITE_SPREAD_API_TOKEN", "backend-token-000000000000");
+    vi.stubEnv("VITE_INGEST_TOKEN", "scraper-token-111111111111");
+    vi.stubEnv("VITE_INGEST_BASE", "https://scraper.example/");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResp({ symbols: [], trading_date: "2026-09-10" })));
+    vi.stubGlobal("fetch", fetchMock);
+    const live = await import("../src/live/api");
+    await live.getSlots();
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+    expect(url).toBe("https://scraper.example/ingest/depth-symbols");
+    expect(init.headers.Authorization).toBe("Bearer scraper-token-111111111111");
+  });
+
+  it("with no VITE_INGEST_TOKEN the scraper call carries NO token (a 401, not a silent fallback)", async () => {
+    vi.stubEnv("VITE_SPREAD_API_TOKEN", "backend-token-000000000000");
+    vi.stubEnv("VITE_INGEST_TOKEN", "");
+    vi.stubEnv("VITE_INGEST_BASE", "https://scraper.example");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResp({ symbols: [], trading_date: "2026-09-10" })));
+    vi.stubGlobal("fetch", fetchMock);
+    const live = await import("../src/live/api");
+    await live.getSlots();
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+    expect(init.headers.Authorization).toBeUndefined();
+  });
+
+  it("a blank VITE_INGEST_BASE falls back to VITE_API_BASE instead of becoming same-origin", async () => {
+    vi.stubEnv("VITE_API_BASE", "https://backend.example/");
+    vi.stubEnv("VITE_INGEST_BASE", "   ");
+    const client = await import("../src/api/client");
+    expect(client.API_BASE).toBe("https://backend.example");
+    expect(client.INGEST_BASE).toBe("https://backend.example");
   });
 });

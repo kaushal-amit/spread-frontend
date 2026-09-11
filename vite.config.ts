@@ -19,12 +19,29 @@ function requireApiBase(env: Record<string, string | undefined>, command: string
   return {
     name: 'spread:require-api-base',
     buildStart() {
-      if (command === 'build' && mode === 'production' && !env.VITE_API_BASE) {
+      const blank = (v: string | undefined) => !v || !v.trim();
+      if (command === 'build' && mode === 'production' && blank(env.VITE_API_BASE)) {
         throw new Error(
           '[SPREAD build] VITE_API_BASE is not set. A production build with no backend URL ' +
           'calls its own origin — the bug that shipped the wss://kse-spread socket and the ' +
           'whole-board 404s. Set VITE_API_BASE (and VITE_INGEST_BASE) to the backend/scraper ' +
           'origin before building, or build with --mode development for a local bundle.');
+      }
+      // A blank VITE_INGEST_BASE ("VITE_INGEST_BASE=" in .env.production) used
+      // to build a bundle whose INGEST_BASE was "" — same-origin, the BOOKS
+      // null crash. Unset falls back to VITE_API_BASE; blank is a mistake.
+      if (command === 'build' && mode === 'production'
+          && env.VITE_INGEST_BASE !== undefined && blank(env.VITE_INGEST_BASE)) {
+        throw new Error(
+          '[SPREAD build] VITE_INGEST_BASE is set but blank. Either point it at the scraper ' +
+          'origin, or remove the line to fall back to VITE_API_BASE (when the backend ' +
+          'reverse-proxies /ingest).');
+      }
+      if (command === 'build' && mode === 'production' && blank(env.VITE_INGEST_TOKEN)) {
+        console.warn(
+          '[SPREAD build] VITE_INGEST_TOKEN is not set — the bundle sends NO token to the ' +
+          'scraper, so BOOKS slot reads and swaps will answer 401. Set it to the scraper\'s ' +
+          'INGEST_TOKEN (a separate secret from VITE_SPREAD_API_TOKEN).');
       }
     },
   };

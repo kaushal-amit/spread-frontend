@@ -95,6 +95,11 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
   const st = useMemo(() => (detail ? phaseOf(detail) : null), [detail]);
   // A message or a typed price belongs to ONE symbol. Switching tabs clears them.
   useEffect(() => { setMsg(null); setPrice(""); setKdIn(""); setFilled(""); setExecs(""); }, [symbol]);
+  // …and to ONE phase: when the position moves on (WATCH → QUEUED_BID →
+  // HOLDING → …) the price box starts empty, so the next default is the
+  // phase's own (the touch offer, the target), never the previous entry.
+  const phaseKey = st?.phase ?? null;
+  useEffect(() => { setPrice(""); setKdIn(""); }, [phaseKey]);
 
   const call = async (label: string, path: string, body: unknown) => {
     // R-18 · review is read-only — a past-session screen must never trigger a
@@ -107,7 +112,11 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
         r.commissionKnown === false ? "commission is a best case — execution count unknown" : null].filter(Boolean).join(" · ");
       setMsg({ cls: r.warning ? "warn" : "ok", text: text || `${label} recorded.` });
       onFeed({ s: symbol, k: label.toUpperCase(), c: r.warning ? "warn" : "up", p: text || `${label} recorded.`, u: 0 });
-      setFilled(""); setExecs("");
+      // A typed price belongs to the ACTION it was typed for. Left in place, the
+      // bid price carried over as the default OFFER after POST BID → FILLED →
+      // HOLDING (POST OFFER at the entry price — the fees lost). Cleared with
+      // the other inputs on every success.
+      setFilled(""); setExecs(""); setPrice(""); setKdIn("");
       onChanged();
     } catch (e: any) {
       const ae = e as ApiError;
@@ -196,8 +205,12 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
   const offers = [...(book?.offers || [])].sort((a, b) => b.price - a.price);   // high → low, touch last
   const bids = [...(book?.bids || [])].sort((a, b) => b.price - a.price);       // touch first
 
+  // A STALE ladder disables the trade buttons: the banner says "do not act on
+  // these levels" and README says the buttons are disabled when stale — they
+  // were disabled only on `error`. A price typed against a picture of the book
+  // from an hour ago is not a decision.
   const btn = (id: string, klass: string, label: string, onClick: () => void, disabled = false) => (
-    <button key={id} className={`btn ${klass}`} id={id} onClick={onClick} disabled={busy || disabled || !!error || readOnly}>{label}</button>
+    <button key={id} className={`btn ${klass}`} id={id} onClick={onClick} disabled={busy || disabled || !!error || readOnly || ladderStale}>{label}</button>
   );
 
   const buttons: React.ReactNode[] = [];
@@ -205,7 +218,10 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
     // R-19 / R-20 · a POST BID is a decision to open; the gate and the stops
     // block it. The server refuses too — this disables the button and says why
     // rather than letting the click bounce off a 409.
-    const stopped = !!stops && !stops.canOpen;
+    // Unknown stops (null) block as hard as a STOP: a verdict that has not been
+    // read is not permission. The server refuses too (R-19/R-20).
+    const stopsUnknown = !stops;
+    const stopped = stopsUnknown || !stops.canOpen;
     const canPost = !!sz.reachable && !!usePx && shares > 0 && detail.session.open && !stopped;
     buttons.push(
       <div key="in" className="trade-inputs">
@@ -215,7 +231,8 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
       </div>,
       btn("btn-go-post", "go", "POST BID", () => call("Post bid", "/trading/record", { symbol, side: "BUY", status: "POSTED", priceFils: usePx, shares }), !canPost),
     );
-    if (stopped) buttons.push(<span key="stopped" className="hint dn" id="detail-stopped">{stops!.mode === "cooloff" ? "no re-entry — 30 min after a loss" : stops!.mode === "careful" ? "careful — one position only" : "no new position"}: {stops!.reasons[0]}</span>);
+    if (stopsUnknown) buttons.push(<span key="stopped" className="hint dn" id="detail-stopped">stops unknown — the session gate has not been read; no new position until it has</span>);
+    else if (stopped) buttons.push(<span key="stopped" className="hint dn" id="detail-stopped">{stops!.mode === "cooloff" ? "no re-entry — 30 min after a loss" : stops!.mode === "careful" ? "careful — one position only" : "no new position"}: {stops!.reasons[0]}</span>);
     if (!detail.session.open) buttons.push(<span key="closed" className="hint">market closed — {detail.session.note}</span>);
     if (!sz.reachable) buttons.push(<span key="unreach" className="hint">{sz.reasons?.join(" · ") || sz.error || "not reachable at this size"}</span>);
   }
@@ -313,8 +330,8 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
               <div className="trio">
                 <span><b>{fmt(shares || c.shares)}</b> sh</span>
                 <span>net <b>{kd(c.netKd)}</b> at {c.metrics.targetTicks}t</span>
-                <span>per fil <b>{(shares ? shares / 1000 : c.netPerFilKd).toFixed(2)}</b></span>
-                <span>trip <b>{c.roundTripKd.toFixed(2)}</b></span>
+                <span>per fil <b>{shares ? (shares / 1000).toFixed(2) : c.netPerFilKd != null ? c.netPerFilKd.toFixed(2) : "—"}</b></span>
+                <span>trip <b>{c.roundTripKd != null ? c.roundTripKd.toFixed(2) : "—"}</b></span>
                 {sz.reachable && <span>size <b>{fmt(Math.round(sz.floor_kd))}–{fmt(Math.round(sz.ceiling_kd))}</b> KD</span>}
                 {ft && <span>fill <b>{ft.label}</b> · {fmt(ft.sharesPerMin)}/min</span>}
               </div>
@@ -333,7 +350,7 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
             {c && (
               <div className="gates">
                 {c.gateGroups.flatMap((g) => g.cells).map((cell) => (
-                  <span key={cell.label} className={`g ${cell.ok ? (cell.warn ? "mid" : "ok") : "no"}`}
+                  <span key={cell.label} className={`g ${cell.check?.computed === false ? "nc" : cell.ok ? (cell.warn ? "mid" : "ok") : "no"}`}
                     title={`${cell.label}${cell.check ? " · " + cell.check.text : cell.sub ? " · " + cell.sub : ""}`}>
                     {cell.label.toLowerCase()} {cell.value}{cell.sub ? <small> {cell.sub}</small> : null}
                     {/* CR-7 · the server's "value vs threshold — PASS/FAIL",
@@ -344,7 +361,7 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
                 ))}
                 {c.metrics.tapeQualityUpPct != null && (
                   <span className={`g ${walkedUp ? "no" : "mid"}`} title="up-only tiny prints vs the blended figure Gate 5 reads — at 2× the up-moves ARE the small prints">
-                    tape up-only {Math.round(c.metrics.tapeQualityUpPct)}% / blended {Math.round(c.metrics.tapeQualityPct)}%{walkedUp ? " — walked up" : ""}
+                    tape up-only {Math.round(c.metrics.tapeQualityUpPct)}% / blended {c.metrics.tapeQualityPct != null ? `${Math.round(c.metrics.tapeQualityPct)}%` : "—"}{walkedUp ? " — walked up" : ""}
                   </span>
                 )}
                 {c.gateStatsSource && <span className="g mid" title="where the queue statistics came from">{c.gateStatsSource === "BACKEND_BRIDGE" ? "bridge" : "scraper"}</span>}

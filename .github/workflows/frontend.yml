@@ -12,6 +12,14 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run typecheck
+      # D2: a production build refuses to complete without a backend URL. CI
+      # builds against a sentinel origin — the bundle it produces is a gate,
+      # not a deploy artefact.
       - run: npm run build
+        env:
+          VITE_API_BASE: https://ci.invalid
+          VITE_INGEST_BASE: https://ci.invalid
+          VITE_INGEST_TOKEN: ci-only-placeholder-token-not-real
+          VITE_SPREAD_API_TOKEN: ci-only-placeholder-token-not-real
       # Ground rule 4: no fee math, gate logic or state maps in the browser.
       - run: '! grep -rn "3\.4\|INITIAL_" src'

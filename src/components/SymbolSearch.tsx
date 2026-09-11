@@ -20,7 +20,8 @@ export const SymbolSearch: React.FC<Props> = ({ show, all, onPick, onClose }) =>
     const t = q.trim().toUpperCase();
     return all
       .filter((s) => (filter === "all" || s.status === filter) && (!t || s.symbol.includes(t)))
-      .sort((a, b) => (a.status === b.status ? b.netKd - a.netKd : ["recommended", "near_miss", "rejected"].indexOf(a.status) - ["recommended", "near_miss", "rejected"].indexOf(b.status)))
+      // Within a status, known net first (descending); an unknown net sorts last, not as 0.
+      .sort((a, b) => (a.status === b.status ? (b.netKd ?? -Infinity) - (a.netKd ?? -Infinity) : ["recommended", "near_miss", "rejected"].indexOf(a.status) - ["recommended", "near_miss", "rejected"].indexOf(b.status)))
       .slice(0, 60);
   }, [all, q, filter]);
   if (!show) return null;
@@ -37,7 +38,7 @@ export const SymbolSearch: React.FC<Props> = ({ show, all, onPick, onClose }) =>
       <div className="addlist">
         {rows.map((s) => (
           <div key={s.symbol} className={`pl ${s.status === "recommended" ? "go" : s.status === "near_miss" ? "open" : "no"}`} onClick={() => onPick(s.symbol)}>
-            <span className="s">{s.symbol}</span><span className="p">{s.price}</span>
+            <span className="s">{s.symbol}</span><span className="p">{s.price ?? "—"}</span>
             <span className="w">{s.status === "recommended" ? (s.takeItBecause || "passes every gate") : s.notComputed.length ? `NOT COMPUTED: ${s.notComputed.join(", ")}` : s.failingGateNames.join(", ")}</span>
             <span className="rg">{fmt(s.shares)} sh · net {kd(s.netKd)}</span>
           </div>

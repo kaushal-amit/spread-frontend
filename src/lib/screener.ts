@@ -48,6 +48,9 @@ export const SCREENER_FILTERS: ScreenerFilterDef[] = [
     key: "BOOK", label: "BOOK CAPTURED",
     predicate: (s) => s.dataQuality !== "NO_BOOK" && s.dataQuality !== "MISSING",
   },
+  // A MEASURED 0 of the last 5 sessions. null (not computed) does not match —
+  // it used to, when the presenter turned null into 0 and every NOT COMPUTED
+  // symbol read as never traded.
   { key: "NEVER_TRADED", label: "NEVER TRADED", predicate: (s) => s.metrics.consistencyDays === 0 },
 ];
 
@@ -71,20 +74,32 @@ export function applyScreener(list: StockCandidate[], key: ScreenerKey): StockCa
  * payload (they live on the detail bundle), so they are omitted here rather than
  * fabricated — loud over plausible.
  */
+/**
+ * A NUMBER THAT IS NOT KNOWN IS "—", NEVER 0. The backend sends null for an
+ * uncomputed statistic (present.js); with the stats bridge empty this strip
+ * used to print "tiny 0% · mv 0 · vol 0×" for every NOT COMPUTED symbol —
+ * and 0 is a measurement (0 moves is a dead stock). The 1d change ROUNDS to
+ * whole fils like the card (SPR-39: no 0.8999999). "net/fil" is the gross KD
+ * per fil of movement (shares / 1000) — it is named so here; the fee-net
+ * figure lives on the detail bundle.
+ */
 export function screenerColumns(s: StockCandidate): { k: string; v: string }[] {
   const m = s.metrics;
-  const sign = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n)}`;
+  const nn = (n: number | null | undefined) => n == null || Number.isNaN(Number(n));
+  const sign = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n))}`;
+  const pct = (n: number | null) => (nn(n) ? "—" : `${Math.round(n as number)}%`);
+  const num = (n: number | null) => (nn(n) ? "—" : String(n));
   return [
-    { k: "px", v: String(s.price) },
+    { k: "px", v: num(s.price) },
     { k: "tick", v: `${m.targetTicks}t` },
-    { k: "1d", v: s.changeFils ? sign(s.changeFils) : "0" },
-    { k: "tiny", v: `${Math.round(m.tapeQualityPct)}%` },
-    { k: "mv", v: String(m.movesPerDay) },
-    { k: "up2", v: String(m.moves2PlusPerDay) },
-    { k: "vol", v: `${m.volSpikeRatio}×` },
-    { k: "post", v: `${Math.round(m.postablePct)}%` },
-    { k: "exit", v: `${Math.round(m.exitDepthPct)}%` },
-    { k: "net/fil", v: m.netPerFilKd != null ? m.netPerFilKd.toFixed(3) : "—" },
+    { k: "1d", v: nn(s.changeFils) ? "—" : sign(s.changeFils as number) },
+    { k: "tiny", v: pct(m.tapeQualityPct) },
+    { k: "mv", v: num(m.movesPerDay) },
+    { k: "up2", v: num(m.moves2PlusPerDay) },
+    { k: "vol", v: nn(m.volSpikeRatio) ? "—" : `${m.volSpikeRatio}×` },
+    { k: "post", v: pct(m.postablePct) },
+    { k: "exit", v: pct(m.exitDepthPct) },
+    { k: "gross/fil", v: nn(m.netPerFilKd) ? "—" : (m.netPerFilKd as number).toFixed(3) },
     { k: "reach", v: s.headroom?.headroomX ? `${s.headroom.headroomX}×` : "—" },
   ];
 }

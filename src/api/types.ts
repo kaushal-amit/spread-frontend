@@ -25,24 +25,31 @@ export interface BehaviourFlag { flag: string; icon: string; label: string; why:
 export type Verdict = 'TRADABLE' | 'NEAR_MISS' | 'NOT_RECOMMENDED' | 'REJECTED' | 'OUT_OF_REACH' | 'DEAD';
 export type Status = 'recommended' | 'near_miss' | 'rejected' | 'not_computed';
 
+/**
+ * A NUMBER THAT IS NOT KNOWN TRAVELS AS NULL, NEVER AS 0 (backend present.js).
+ * Every measured field below may be null while the statistic is uncomputed —
+ * render "—", never a zero that reads as a measurement.
+ */
+export type Num = number | null;
+
 export interface StockCandidate {
   symbol: string; nameAr?: string;
-  price: number; bid: number; offer: number; spread: number;
+  price: Num; bid: Num; offer: Num; spread: Num;
   entryPlacement: 'INSIDE' | 'AT_BID';
-  shares: number; notionalKd: number; roundTripKd: number; netKd: number; netPerFilKd: number;
-  trendWarn: boolean; changeFils: number; changePct: number; rising: boolean | null;
+  shares: Num; notionalKd: Num; roundTripKd: Num; netKd: Num; netPerFilKd: Num;
+  trendWarn: boolean; changeFils: Num; changePct: Num; rising: boolean | null;
   status: Status; verdict: Verdict;
   failingGatesCount: number; failingGateNames: string[]; rejectionDetail?: string;
   gateGroups: GateGroup[]; takeItBecause?: string; careful?: string;
-  headroom: { minKd: number; maxKd: number; profitPerFil: number; currentKd: number; headroomX: number };
+  headroom: { minKd: Num; maxKd: Num; profitPerFil: Num; currentKd: Num; headroomX: Num };
   market: string; marketVerified: boolean;
   isDead: boolean; isOutOfReach: boolean; isStructuralFailure: boolean;
   behaviourFlags: BehaviourFlag[];
   metrics: {
-    priceFils: number; netKd: number; netPerFilKd: number; tradeSizeShares: number; movesPerDay: number;
-    moves2PlusPerDay: number; tapeQualityPct: number; tapeQualityUpPct: number | null; postablePct: number; exitDepthPct: number;
-    volSpikeRatio: number; outwardBlockFlowRatio: number; consistencyDays: number; gapPresentPct: number;
-    dailyRangeFils: number; targetTicks: number;
+    priceFils: Num; netKd: Num; netPerFilKd: Num; tradeSizeShares: Num; movesPerDay: Num;
+    moves2PlusPerDay: Num; tapeQualityPct: Num; tapeQualityUpPct: Num; postablePct: Num; exitDepthPct: Num;
+    volSpikeRatio: Num; outwardBlockFlowRatio: Num; consistencyDays: Num; gapPresentPct: Num;
+    dailyRangeFils: Num; targetTicks: number;
     // R-06 · the walked-up marker, decided by the server (funnel gate 5), never recomputed here.
     walkedUp?: boolean;
     // A5 · the 09:00–09:45 range-over-cost. A ranking column, NOT a gate: null
@@ -148,6 +155,9 @@ export interface BoardUpdate {
   counts: Record<string, number>; reach: { reachable: number; total: number; note: string } | null;
   session: { open: boolean; phase: string; note: string }; coverage: unknown;
   stops?: SessionStops;
+  // §0 · null when the board computed; { code, error } when it did not. The
+  // buckets are then empty AND meaningless — render BROKEN, never a quiet market.
+  error?: { code: string; error: string } | null;
 }
 
 // ─── the detail page (GET /api/stocks/:symbol/detail) ──────────────────────
@@ -219,7 +229,13 @@ export interface EntryAlertMsg { symbol: string; fire: boolean; bidFils: number;
 export interface FeedServerEvent { id: string; kind: 'entry' | 'halt'; symbol: string; at: string; level: string; title: string; body: string }
 
 // ─── SPR-27/30 · the capture-feed roster (GET /api/feeds, spread:feedHealth) ─
-export interface FeedScript { script: string; status: 'ok' | 'silent' | 'absent'; version?: string | null; rowsSeen?: number | null; problem?: string | null; lastSeenAt?: string | null; silentSec?: number | null }
+// `degraded` (backend feedHealth / scraper 040): checking in, but the panel
+// reports a problem, sees 0 rows in the session, or nothing has been accepted.
+export interface FeedScript {
+  script: string; status: 'ok' | 'silent' | 'absent' | 'degraded'; reason?: string | null;
+  version?: string | null; rowsSeen?: number | null; rowsInserted?: number | null; problem?: string | null;
+  lastSeenAt?: string | null; silentSec?: number | null; lastSubmissionAt?: string | null; submissionSec?: number | null;
+}
 export interface FeedHealth { available: boolean; maxAgeSec?: number; scripts: FeedScript[] }
 export interface StrandedMsg { symbol: string; legId: number; message: string; options?: string[]; side?: 'BUY' | 'SELL'; code?: string; priceFils?: number; bidFils?: number; offerFils?: number | null; quoteAt?: string | null }
 

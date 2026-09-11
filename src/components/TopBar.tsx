@@ -106,16 +106,20 @@ export const TopBar: React.FC<TopBarProps> = ({
   // unknown, not a fact — so FLAT becomes an honest "FEED SILENT/ABSENT".
   const feeds = feedsLive.data;
   const ordersFeed = feeds?.available ? feeds.scripts.find((s) => s.script === "orders") : null;
-  const ordersDown = ordersFeed && ordersFeed.status !== "ok" ? ordersFeed.status : null;
+  // No roster at all (/feeds failed, or the heartbeat table is absent) is not
+  // "the orders feed is fine": it read FLAT. Unknown is unknown.
+  const feedsUnknown = !feeds || feeds.available === false || (feeds.available && !ordersFeed);
+  const ordersDown = feedsUnknown ? "unknown" : ordersFeed && ordersFeed.status !== "ok" ? ordersFeed.status : null;
   const ordersSince = ordersFeed?.lastSeenAt
-    ? new Date(ordersFeed.lastSeenAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    ? kuwaitHHMM(ordersFeed.lastSeenAt)
     : null;
   const posDisplay = open.length === 0
-    ? (ordersDown ? (ordersDown === "absent" ? "ORDERS FEED ABSENT" : `ORDERS FEED SILENT${ordersSince ? ` · since ${ordersSince}` : ""}`) : "FLAT")
+    ? (ordersDown ? (ordersDown === "unknown" ? "POSITION UNKNOWN" : ordersDown === "absent" ? "ORDERS FEED ABSENT" : ordersDown === "degraded" ? "ORDERS FEED DEGRADED" : `ORDERS FEED SILENT${ordersSince ? ` · since ${ordersSince}` : ""}`) : "FLAT")
     : open.length === 1 ? `LONG ${fmt(open[0].shares)} ${open[0].symbol}` : `${open.length} OPEN`;
   const posTooltip = open.length
     ? open.map((p) => `${p.symbol}: ${fmt(p.shares)} sh @ ${p.entry ?? "—"} (${fmt(Math.round(p.committedKd))} KD) [${p.state}]${p.markedAt === "entry" ? " — no quote today" : ""}`).join("\n")
-    : ordersDown ? `the orders feed is ${ordersDown}${ordersSince ? ` (last seen ${ordersSince})` : ""} — positions cannot be confirmed, so this is not a flat book${ordersFeed?.problem ? `\n${ordersFeed.problem}` : ""}`
+    : ordersDown === "unknown" ? `the feed roster is unavailable${feedsLive.error ? ` (${(feedsLive.error as { message?: string }).message})` : ""} — whether the orders feed is alive is unknown, so this is not a flat book`
+    : ordersDown ? `the orders feed is ${ordersDown}${ordersSince ? ` (last seen ${ordersSince})` : ""}${ordersFeed?.reason ? ` — ${ordersFeed.reason}` : ""} — positions cannot be confirmed, so this is not a flat book${ordersFeed?.problem ? `\n${ordersFeed.problem}` : ""}`
     : contracts ? "No open positions" : placeholder(cSt);
 
   // SPR-27/30 · any capture feed that is silent or absent, surfaced on the face.
@@ -225,7 +229,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           inferred from an empty board. `absent` never checked in; `silent`
           checked in then stopped. */}
       {badFeeds.length > 0 && (
-        <span className="fld" id="feed-health" title={badFeeds.map((s) => `${s.script}: ${s.status}${s.lastSeenAt ? ` — last seen ${new Date(s.lastSeenAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}${s.problem ? ` (${s.problem})` : ""}`).join("\n")}>
+        <span className="fld" id="feed-health" title={badFeeds.map((s) => `${s.script}: ${s.status}${s.reason ? ` — ${s.reason}` : ""}${s.lastSeenAt ? ` — last seen ${kuwaitHHMM(s.lastSeenAt)} Kuwait` : ""}${s.problem ? ` (${s.problem})` : ""}`).join("\n")}>
           <span className="k">FEEDS</span>
           <span className="v dn">{badFeeds.map((s) => `${s.script} ${s.status}`).join(" · ")}</span>
         </span>

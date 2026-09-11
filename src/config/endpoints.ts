@@ -37,6 +37,11 @@ export const TIMEOUT_MS: Record<string, number> = {
   '/sessions': 20_000,
   '/ai/ask': 30_000,    // the model call is slow by nature
   '/feed': 12_000,
+  // A write must not be cut off by the client while the server is still
+  // committing: a 408 after the commit read as a failure and invited a retry
+  // that booked it twice. /gates recomputes the board twice on the server.
+  '/trading': 30_000,
+  '/gates': 30_000,
 };
 
 /** The request timeout for a path — the longest matching prefix, else default. */

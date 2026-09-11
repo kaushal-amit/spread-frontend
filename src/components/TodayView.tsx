@@ -74,7 +74,11 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   const near = board?.nearMiss ?? [];
   const rej = board?.rejected ?? [];
   const all = board?.all ?? [];
-  const notComputed = all.filter((s) => s.notComputed?.length);
+  // SPR-38 · the NOT COMPUTED bucket is the SERVER's (cards that fail only on
+  // uncomputed gates). Deriving it from `all` put every rejected card with one
+  // uncomputed gate in BOTH lists (live: 112 rejected + 140 not computed for
+  // 140 symbols) and hid the gate that really failed behind "NOT COMPUTED: …".
+  const notComputed = board?.notComputed ?? [];
   // C1 · apply the active screener predicate to each bucket for RENDERING. The
   // top state line keeps the true totals; the sections below show the filtered
   // slices so ALL is the board unchanged and any other chip narrows it.
@@ -87,6 +91,10 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   // R-38 · the two causes come from the server (screening counts), not the browser.
   const noQuotes = board?.counts?.noQuotes ?? 0;
   const noStats = board?.counts?.noStats ?? 0;
+  // §0 · EMPTY IS NOT BROKEN — and a board with no symbols AND no counts is
+  // broken, not empty: a computed board always carries its counts. Without
+  // this a failed screen read "0 symbols · live · nothing passes every gate".
+  const boardBroken = !!board && !boardError && all.length === 0 && Object.keys(board.counts ?? {}).length === 0;
   const bridged = all.filter((s) => s.gateStatsSource === "BACKEND_BRIDGE").length;
 
   // A5 · the m45 column — "2.4 · 09:45" from the 09:00–09:45 range-over-cost,
@@ -103,16 +111,22 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
   };
 
   const card = (s: StockCandidate, cls: "go" | "near" | "no") => {
+    // A rejected card names the gates that MEASURED a failure; the uncomputed
+    // ones follow, marked, so "NOT COMPUTED: …" never hides a real reject.
+    const nc = new Set(s.notComputed ?? []);
+    const realFails = s.failingGateNames.filter((g) => !nc.has(g));
     const why = cls === "go"
       ? s.takeItBecause || `net ${kd(s.netKd)} at ${s.metrics.targetTicks} tick${s.metrics.targetTicks === 1 ? "" : "s"}`
-      : s.notComputed?.length
-        ? `NOT COMPUTED: ${s.notComputed.join(", ")}`
-        : `${s.failingGateNames.join(", ")}${s.rejectionDetail ? " · " + s.rejectionDetail : ""}`;
+      : s.status === "not_computed" || (!realFails.length && nc.size)
+        ? `NOT COMPUTED: ${[...nc].join(", ")}`
+        : `${realFails.join(", ")}${nc.size ? ` · not computed: ${[...nc].join(", ")}` : ""}${s.rejectionDetail ? " · " + s.rejectionDetail : ""}`;
+    // CR-7 · every gate's "value vs threshold — PASS/FAIL" line, on the card's tooltip.
+    const checks = s.gateGroups?.flatMap((g) => g.cells).filter((c) => c.check?.text).map((c) => `${c.label}: ${c.check!.text}`).join("\n") ?? "";
     return (
       <div key={`${s.symbol}-${cls}`} className={`pl ${cls === "near" ? "open" : cls} ${s.notComputed?.length ? "nc" : ""}`}
-        id={`plan-card-${s.symbol}`} onClick={() => onPickSymbol(s.symbol)} title={s.careful || ""}>
+        id={`plan-card-${s.symbol}`} onClick={() => onPickSymbol(s.symbol)} title={[s.careful || "", checks].filter(Boolean).join("\n")}>
         <span className="s">{s.symbol}{s.market && /premier/i.test(s.market) ? <sup title="Premier Market: 0.10%"> P</sup> : null}</span>
-        <span className="p">{s.price}{s.changeFils ? <small className={s.changeFils > 0 ? "up" : "dn"}> {s.changeFils > 0 ? "▲" : "▼"}{chgFil(s.changeFils, s.price)}</small> : null}</span>
+        <span className="p">{s.price ?? "—"}{s.changeFils ? <small className={s.changeFils > 0 ? "up" : "dn"}> {s.changeFils > 0 ? "▲" : "▼"}{chgFil(s.changeFils, s.price)}</small> : null}</span>
         <span className="w">{why}</span>
         {cls === "go" && <span className="rg">{fmt(s.shares)} sh · net {kd(s.netKd)}{m45Tag(s)}</span>}
         {cls !== "go" && s.behaviourFlags?.length ? <span className="rg">{s.behaviourFlags.map((b) => b.label).join(" · ")}{m45Tag(s)}</span> : null}
@@ -179,6 +193,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
       {/* ── state line: loud, not plausible ── */}
       <p className="plan" id="board-state">
         {boardError ? <b className="dn">BOARD UNAVAILABLE — {(boardError as any).code || "error"}: {boardError.message}</b>
+          : boardBroken ? <b className="dn">BOARD BROKEN — the server returned no symbols and no counts. Not a quiet market: check the backend.</b>
           : boardLoading && !board ? "Loading the board…"
           : board ? <>
               {board.tradingDay ? `Session ${board.tradingDay}` : "Board"} · {all.length} symbols · <b>{rec.length}</b> recommended · <b>{near.length}</b> one gate away · {rej.length} rejected{notComputed.length ? ` · ${notComputed.length} not computed` : ""}
@@ -236,7 +251,7 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
         <span className="plk">WORTH TAKING{filterActive ? ` · ${screenerLabel(SCREENER_FILTERS.find((f) => f.key === filter)!, board?.budgetKd ?? null)}` : ""}</span>
         {recF.filter((s) => !openSyms.has(s.symbol)).length
           ? recF.filter((s) => !openSyms.has(s.symbol)).map((s) => card(s, "go"))
-          : <div className="pl none">{board ? (filterActive ? "None of the recommended pass this filter." : "Nothing on the board passes every gate right now.") : "—"}</div>}
+          : <div className="pl none">{boardError ? "board unavailable — nothing was evaluated" : boardBroken ? "no symbols came back and no counts — this is a broken board, not a quiet one" : board ? (filterActive ? "None of the recommended pass this filter." : "Nothing on the board passes every gate right now.") : "—"}</div>}
       </div>
 
       {nearF.length > 0 && (
