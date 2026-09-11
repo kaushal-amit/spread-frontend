@@ -77,6 +77,9 @@ export interface StockCandidate {
   /** Gates that failed for want of a NUMBER, not for want of a stock. */
   notComputed: string[];
   gateStatsSource: 'SCRAPER' | 'BACKEND_BRIDGE' | null;
+  // F11 · the wake-up pace (live.wakeUpScan, stamped on the snapshot's cards): trades so far against
+  // the symbol's own median by this hour. null = not flagged (or the scan did not run — board.wakeups says).
+  wakeup?: { paceRatio: number; tradesSoFar: number; baseline: number; measuredAt: string; lowConfidence: boolean; why: string } | null;
   // R-25 · FLOW step 4 checks 1-2, computed server-side from today's open/last/high.
   // Distinct from `trendWarn` (the yesterday-based DIRECTION warn-gate).
   liveDirection?: {
@@ -186,6 +189,8 @@ export interface BoardUpdate {
   counts: Record<string, number>; reach: { reachable: number; total: number; note: string } | null;
   session: { open: boolean; phase: string; note: string }; coverage: unknown;
   stops?: SessionStops;
+  // F11 · the symbols waking up now, or null when the scan could not run.
+  wakeups?: { symbol: string; paceRatio: number; lowConfidence: boolean }[] | null;
   // §0 · null when the board computed; { code, error } when it did not. The
   // buckets are then empty AND meaningless — render BROKEN, never a quiet market.
   error?: { code: string; error: string } | null;
@@ -199,15 +204,30 @@ export interface BookLevel {
   // R-24 · deterministic markers (BAIT/AGED/UNDERCUT/CEILING/SHELF/NOPROT/CATCH), computed server-side.
   markers?: LadderMarker[]; ageMins?: number; aged?: boolean; presencePct?: number;
 }
+/**
+ * F8 · a whole-book banner, the server's words:
+ *   DOUBLE WALL  the scraper's is_frozen on both sides (a state, amber);
+ *   CLOSING BID  the previous close's bid gone by the first capture — an
+ *                OBSERVATION, not a verdict (11 Sep: whether resting bids
+ *                survive the close is not established), so it is printed dim.
+ */
+export interface BookBanner { type: 'DOUBLE WALL' | 'CLOSING BID'; text: string }
 export interface OrderBook {
   symbol: string; bid: number; bid_qty: number; offer: number; offer_qty: number; last_price: number; trades: number;
   bids: BookLevel[]; offers: BookLevel[]; dayRange: { low: number; high: number };
   limitBand: { low: number; high: number }; lastTickTime: string;
+  // F8 · decided server-side (depth.ladder / ladderFlow): banners, the notes for levels that vanished,
+  // and the traded volume between the last two captures (null = unknown → no flow marker was claimed).
+  banners?: BookBanner[]; flowNotes?: string[]; volumeDelta?: number | null;
 }
 export interface Sizing {
   symbol: string; price_fils: number | null; floor_kd: number; ceiling_kd: number;
   suggested_kd: number | null; suggested_shares: number | null; your_pct: number | null; net_per_fil_kd: number | null;
   reachable: boolean; reasons: string[];
+  // KB gate 12 · the exit depth, measured against the suggested size — a WARNING, never a band bound.
+  // ok = the offer at the touch is no more than max_x times your size (else you queue behind it).
+  exit_depth?: { offer_qty: number | null; your_shares: number | null; multiple: number | null; max_x: number; computed: boolean; ok: boolean | null };
+  warnings?: string[];
   // R-23 · the floor is built from the AGED bid; the touch is shown beside it so bait is visible.
   basis: { free_kd: number; committed_kd: number; budget_kd: number; bid_qty: number | null;
     touch_bid_qty?: number | null; aged_bid_qty?: number | null; aged_from_fils?: number | null; aged_age_mins?: number | null;

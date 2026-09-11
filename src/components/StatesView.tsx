@@ -64,7 +64,7 @@ function sessionRows(session: SessionInfo | null, stops: SessionStops | null): [
     ["COOL-OFF", "a loss closed — no re-entry for the cool-off window", "closes only", mode === "cooloff"],
     ["STOP", "the session stops: breadth, losses, or past the flat-by clock", "closes only", mode === "stop"],
     ["BE FLAT", "past the flat-by clock — you should be flat; a hit-bid into the closing auction is refused", "closes refused until Trading at Last", !!stops?.pastFlatBy && phase !== "tal" && phase !== "closed"],
-    ["TRADING AT LAST", "13:10–13:30 — trades at the closing-auction price only", "CLOSE AT AUCTION PRICE · CANCEL + CLOSE AT AUCTION", phase === "tal"],
+    ["TRADING AT LAST", "13:10–13:14 (the exchange's TAL label) — trades at the closing-auction price only", "CLOSE AT AUCTION PRICE · CANCEL + CLOSE AT AUCTION", phase === "tal"],
     ["CLOSED", "the session is over, or a weekend", "nothing — the graded board arrives after stats:daily", phase === "closed" || mode === "closed"],
   ];
 }

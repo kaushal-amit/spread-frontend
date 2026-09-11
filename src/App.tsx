@@ -211,11 +211,19 @@ export default function App() {
       ...board.data.recommended.map((s) => ({ symbol: s.symbol, price: s.price, kind: "go" as const })),
       ...board.data.nearMiss.slice(0, 10).map((s) => ({ symbol: s.symbol, price: s.price, kind: "near" as const })),
     ];
+    // F11 · the wake-ups (the server's scan) as chips, with their pace.
+    for (const w of board.data.wakeups ?? []) {
+      const s = board.data.all.find((x) => x.symbol === w.symbol);
+      chips.push({ symbol: w.symbol, price: s?.price ?? null, kind: "wake" as const, paceRatio: w.paceRatio, lowConfidence: w.lowConfidence });
+    }
     if (curSymbol && !chips.some((c) => c.symbol === curSymbol)) {
       const s = board.data.all.find((x) => x.symbol === curSymbol);
       chips.push({ symbol: curSymbol, price: s?.price ?? null, kind: "near" as const });
     }
-    return chips.filter((c, i, a) => a.findIndex((x) => x.symbol === c.symbol) === i);
+    // One chip per symbol; the wake-up pace rides on whichever chip stays.
+    const paced = new Map(chips.filter((c) => c.paceRatio != null).map((c) => [c.symbol, c]));
+    return chips.filter((c, i, a) => a.findIndex((x) => x.symbol === c.symbol) === i)
+      .map((c) => (paced.has(c.symbol) ? { ...c, paceRatio: paced.get(c.symbol)!.paceRatio, lowConfidence: paced.get(c.symbol)!.lowConfidence } : c));
   }, [board.data, contractsLive.data, curSymbol]);
 
   const filteredFeed = useMemo(() => {
@@ -293,7 +301,7 @@ export default function App() {
           UNKNOWN: a missing verdict is never rendered as "you may trade". */}
       <SessionBanner stops={board.data?.stops ?? session.data?.stops ?? null} />
 
-      <SymbolSearch show={showSearch} all={board.data?.all || []}
+      <SymbolSearch show={showSearch} all={board.data?.all || []} budgetKd={board.data?.budgetKd ?? null}
         onPick={(s) => { openSymbol(s); setShowSearch(false); }} onClose={() => setShowSearch(false)} />
 
       <div className={`main split-layout layout-${viewMode} ${isFullscreen ? "is-fullscreen" : ""}`} id="main" ref={mainScrollRef}>

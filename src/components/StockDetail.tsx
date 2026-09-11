@@ -272,6 +272,15 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
   const yourShares = detail.yourShares ?? sz.suggested_shares ?? 0;
   const offers = [...(book?.offers || [])].sort((a, b) => b.price - a.price);   // high → low, touch last
   const bids = [...(book?.bids || [])].sort((a, b) => b.price - a.price);       // touch first
+  // F8 · the markers present in this book, once each, with a count.
+  const legend = (() => {
+    const seen = new Map<string, { event: string; text: string; count: number }>();
+    for (const l of [...bids, ...offers]) for (const m of l.markers ?? []) {
+      const cur = seen.get(m.event);
+      if (cur) cur.count += 1; else seen.set(m.event, { event: m.event, text: m.text ?? m.event, count: 1 });
+    }
+    return [...seen.values()];
+  })();
 
   // A STALE ladder disables the trade buttons: the banner says "do not act on
   // these levels" and README says the buttons are disabled when stale — they
@@ -336,6 +345,9 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
     else if (stopped) buttons.push(<span key="stopped" className="hint dn" id="detail-stopped">{stops!.mode === "cooloff" ? "no re-entry — 30 min after a loss" : stops!.mode === "careful" ? "careful — one position only" : "no new position"}: {stops!.reasons[0]}</span>);
     if (!detail.session.open) buttons.push(<span key="closed" className="hint">market closed — {detail.session.note}</span>);
     if (!sz.reachable) buttons.push(<span key="unreach" className="hint">{sz.reasons?.join(" · ") || sz.error || "not reachable at this size"}</span>);
+    // KB gate 12 · the server's sizing warnings (the exit depth over 3× your
+    // size) — a warning, never a refusal; printed as the server said it.
+    for (const [i, w] of (sz.warnings ?? []).entries()) buttons.push(<span key={`szwarn-${i}`} className="hint dn" id={`sizing-warning-${i}`}>{w}</span>);
   }
   if (phase === "QUEUED_BID" && st.postedBuy) {
     const leg = st.postedBuy;
@@ -561,6 +573,14 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
               {detailAt ? ` · bundle fetched ${ageLabel(ageSec(detailAt))} ago` : ""}. Do not act on these levels.</span>
           </div>
         )}
+        {/* F8 · the whole-book banners, first, the server's words: DOUBLE WALL is a
+            state (amber); CLOSING BID is an observation, not a verdict, so it is dim. */}
+        {(book?.banners ?? []).map((b, i) => (
+          <div key={`banner-${i}`} className={`flow bk-banner ${b.type === "DOUBLE WALL" ? "bk-banner-doublewall" : "bk-banner-observation"}`} id={`book-banner-${i}`} data-banner={b.type}>
+            <span className="lab">{b.type}</span>
+            <span className="bk-banner-msg">{b.text}</span>
+          </div>
+        ))}
         <div className="flow" id="book-flow">
           <span className="lab">BOOK</span>
           {book ? <>
@@ -587,6 +607,16 @@ export const StockDetail: React.FC<Props> = ({ symbol, detail, error, loading, d
         {bids.map((l, i) => row(l, "b", i === 0))}
         {book && book.bids.length <= 1 && book.offers.length <= 1 && (
           <div className="bk-legend"><span className="bk-legend-item hint">only the touch — this symbol is not in the depth sweep (BOOKS tab swaps a slot)</span></div>
+        )}
+        {/* F8 · the legend of the markers present in THIS book (the reference's
+            dynamic legend), and the flow notes for levels that vanished. The
+            volume delta says whether the flow markers were computed at all. */}
+        {book && (legend.length > 0 || (book.flowNotes ?? []).length > 0 || book.volumeDelta === null) && (
+          <div className="bk-legend" id="ladder-legend">
+            {legend.map((m) => <span key={m.event} className={`bk-legend-item bk-${m.event.toLowerCase()}`} title={m.text}><span className="mk">{m.count > 1 ? `${m.count}×` : "•"}</span><span className="lbl">{m.event.toLowerCase()}</span></span>)}
+            {(book.flowNotes ?? []).map((n, i) => <span key={`fn-${i}`} className="bk-legend-item hint" id={`flow-note-${i}`}>{n}</span>)}
+            {book.volumeDelta === null && (book.bids.length > 1 || book.offers.length > 1) && <span className="bk-legend-item hint" id="flow-not-computed">flow not computed — no volume reading beside the last two captures</span>}
+          </div>
         )}
         {detail.legs.length > 0 && (
           <div className="bk-legend" id="legs-today">

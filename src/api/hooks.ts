@@ -155,6 +155,8 @@ export interface Board {
   notComputed: StockCandidate[];
   all: StockCandidate[]; counts: Record<string, number>; tradingDay: string | null; budgetKd: number | null;
   reach: BoardUpdate["reach"]; stops: BoardUpdate["stops"] | null;
+  // F11 · the wake-ups: a list, null when the scan could not run, undefined from a pre-F11 server.
+  wakeups?: BoardUpdate["wakeups"];
 }
 
 export function useBoard(): Live<Board> & { connected: boolean; tick: number; disconnectedSince: number | null } {
@@ -178,6 +180,7 @@ export function useBoard(): Live<Board> & { connected: boolean; tick: number; di
       recommended: take, nearMiss: oneAway, rejected: [...priceWarn, ...leave],
       all: [...take, ...oneAway, ...priceWarn, ...leave, ...notComputed],
       counts: u.counts, tradingDay: u.tradingDay, budgetKd: u.budgetKd, reach: u.reach, stops: u.stops ?? null,
+      wakeups: u.wakeups,
     };
   })() : null;
   // `tick` — a write happened (the last PARTIAL's seq): the detail bundle re-reads on it.

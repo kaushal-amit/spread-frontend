@@ -149,7 +149,9 @@ export const TodayView: React.FC<Props> = ({ board, boardError, boardLoading, co
       <div key={`${s.symbol}-${cls}`} className={`pl ${cls === "near" ? "open" : cls} ${s.notComputed?.length ? "nc" : ""} ${s.structuralReason ? "structural" : ""} ${s.bucket === "PRICE_WARN" ? "pw" : ""}`}
         data-bucket={s.bucket} data-structural={s.structuralReason || undefined}
         id={`plan-card-${s.symbol}`} onClick={() => onPickSymbol(s.symbol)} title={[s.careful || "", checks].filter(Boolean).join("\n")}>
-        <span className="s">{s.symbol}{s.market && /premier/i.test(s.market) ? <sup title="Premier Market: 0.10%"> P</sup> : null}</span>
+        <span className="s">{s.symbol}{s.market && /premier/i.test(s.market) ? <sup title="Premier Market: 0.10%"> P</sup> : null}
+          {/* F11 · the wake-up pace, from the server's scan on this card. */}
+          {s.wakeup ? <b className="wake-badge" title={s.wakeup.why + (s.wakeup.lowConfidence ? " — low confidence this early" : "")}> {s.wakeup.paceRatio}×{s.wakeup.lowConfidence ? "?" : ""}</b> : null}</span>
         <span className="p">{s.price ?? "—"}{s.changeFils ? <small className={s.changeFils > 0 ? "up" : "dn"}> {s.changeFils > 0 ? "▲" : "▼"}{chgFil(s.changeFils, s.price)}</small> : null}</span>
         <span className="w">{why}</span>
         {cls === "go" && <span className="rg">{fmt(s.shares)} sh · net {kd(s.netKd)}{m45Tag(s)}</span>}

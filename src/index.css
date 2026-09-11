@@ -493,6 +493,10 @@ body {
 .chip.hot .m { background: var(--wait); animation: blink 1.4s infinite; }
 .chip.up { color: var(--go); }
 .chip.up .m { background: var(--go); }
+/* F11 · a waking symbol: the wake colour, and the pace badge on any chip or card */
+.chip.wake { color: var(--wait); }
+.chip.wake .m { background: var(--wait); }
+.wake-badge { color: var(--wait); font-family: "IBM Plex Mono", monospace; font-size: 10px; font-weight: 700; letter-spacing: 0; }
 
 @keyframes blink {
   50% { opacity: .2; }
@@ -1368,13 +1372,14 @@ body {
   font-size: 11px;
 }
 
-.flow.bk-banner-phantom .lab {
-  color: var(--stop);
-  border-color: rgba(255, 107, 91, 0.4);
+/* CLOSING BID is an observation, not a verdict — dim, never the danger colour. */
+.flow.bk-banner-observation .lab {
+  color: var(--dim);
+  border-color: rgba(139, 146, 158, 0.4);
 }
 
-.flow.bk-banner-phantom .bk-banner-msg {
-  color: var(--stop);
+.flow.bk-banner-observation .bk-banner-msg {
+  color: var(--dim);
   font-size: 11px;
 }
 

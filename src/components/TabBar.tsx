@@ -6,7 +6,7 @@
 import React from "react";
 import { AlertState } from "../types";
 
-export interface LiveChip { symbol: string; price: number | null; kind: "open" | "go" | "near" }
+export interface LiveChip { symbol: string; price: number | null; kind: "open" | "go" | "near" | "wake"; paceRatio?: number; lowConfidence?: boolean }
 
 interface TabBarProps {
   liveChips: LiveChip[] | null;
@@ -45,11 +45,13 @@ export const TabBar: React.FC<TabBarProps> = ({ liveChips, onPickSymbol, cur, cu
       {liveChips && liveChips.length === 0 && <div className="chip slotfree" id="slot-free-indicator">nothing open, nothing recommended</div>}
       {liveChips && liveChips.filter((c) => c.symbol !== curSymbol).map((c) => (
         <div key={`live-${c.symbol}`}
-          className={`chip ${c.kind === "open" ? "hot" : c.kind === "go" ? "up" : ""}`}
-          id={`chip-${c.symbol}`} onClick={() => onPickSymbol(c.symbol)}
-          title={c.kind === "open" ? "open position" : c.kind === "go" ? "passes every gate" : "one gate away"}>
+          className={`chip ${c.kind === "open" ? "hot" : c.kind === "go" ? "up" : c.kind === "wake" ? "wake" : ""}`}
+          id={`chip-${c.symbol}`} onClick={() => onPickSymbol(c.symbol)} data-kind={c.kind}
+          title={c.kind === "open" ? "open position" : c.kind === "go" ? "passes every gate" : c.kind === "wake" ? `waking up — ${c.paceRatio}× its own pace${c.lowConfidence ? " (low confidence this early)" : ""}` : "one gate away"}>
           <span className="m"></span>
           {c.symbol}
+          {/* F11 · the wake-up pace, on whichever chip the symbol has. */}
+          {c.paceRatio != null && <b className="wake-badge"> {c.paceRatio}×{c.lowConfidence ? "?" : ""}</b>}
           <span className="px">{c.price ?? "—"}</span>
         </div>
       ))}

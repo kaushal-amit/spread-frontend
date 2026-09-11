@@ -142,8 +142,11 @@ describe("F3 / F4 · TAKE IT ANYWAY", () => {
     return d;
   };
 
-  it("a TAKE card inside the band posts plainly", async () => {
-    await render(watch("TAKE"));
+  it("a TAKE card inside the band posts plainly, and a sizing warning is printed as the server said it", async () => {
+    const d = watch("TAKE");
+    d.sizing = { ...d.sizing, exit_depth: { offer_qty: 90000, your_shares: 2000, multiple: 45, max_x: 3, computed: true, ok: false }, warnings: ["the offer at the touch is 45× your 2,000 — over 3×, you queue behind it to get out"] };
+    await render(d);
+    expect(host.querySelector("#sizing-warning-0")?.textContent).toMatch(/45× your 2,000 — over 3×/);
     expect(button("btn-go-post")).not.toBeNull();
     expect(button("btn-take-anyway")).toBeNull();
     await click("btn-go-post");

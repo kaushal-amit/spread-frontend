@@ -38,7 +38,7 @@ const facts: HoldFacts = {
   volume: { computed: false, reason: "volume ratio not computed for this symbol (stats:daily)" },
   ceiling: { computed: true, priceFils: 255, qty: 400000, presencePct: 96, note: "255 × 400,000 — present 96% of the session" },
   refill: { computed: false, reason: "not measured — the bid-rebuild count needs per-level change tracking (F8)" },
-  exitOk: { computed: true, offerQty: 12000, yourShares: 3000, multiple: 4, thresholdX: 3, ok: true, note: "offer 12,000 = 4.0× your 3,000 — you are not the level" },
+  exitOk: { computed: true, offerQty: 12000, yourShares: 3000, multiple: 4, thresholdX: 3, ok: false, note: "offer 12,000 = 4.0× your 3,000 — over 3×, you queue behind it" },
 };
 
 let root: Root, host: HTMLDivElement;
@@ -65,7 +65,8 @@ describe("F6 · the hold grid", () => {
     expect(cells[3].querySelector(".x")!.textContent).toMatch(/not computed for this symbol/);
     expect(cells[5].querySelector(".x")!.textContent).toMatch(/not measured/);
     expect(cells[6].querySelector(".v")!.textContent).toBe("4×");
-    expect(cells[6].className).toMatch(/good/);
+    expect(cells[6].className).toMatch(/bad/);
+    expect(cells[6].querySelector(".x")!.textContent).toMatch(/queue behind it/);
   });
   it("is absent on WATCH and DONE", async () => {
     const d = base(); d.session = openSession; d.holdFacts = facts; d.contract = null; d.legs = []; d.closedToday = [];
