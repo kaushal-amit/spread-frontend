@@ -1,44 +1,35 @@
 /**
  * src/api/client.ts — ONE way to reach the backend.
  *
- * Base URL and token come from the environment (VITE_API_BASE,
- * VITE_SPREAD_API_TOKEN), so a static build works behind a reverse proxy and
- * the dev server works through the Vite proxy with both left blank. Every
- * failure is an ApiError carrying the backend's code — never swallowed into an
- * empty list. An empty list and a failed fetch render identically and only one
- * of them is information.
+ * The base URL comes from the environment (VITE_API_BASE), so a static build
+ * works behind a reverse proxy and the dev server works through the Vite
+ * proxy with it left blank. The credential is the signed-in user's Firebase
+ * ID token (src/auth.ts) — D3: no static token is compiled into this bundle
+ * any more. Every failure is an ApiError carrying the backend's code — never
+ * swallowed into an empty list. An empty list and a failed fetch render
+ * identically and only one of them is information.
  */
+import { idToken, configured as authConfigured } from '../auth';
+
 export class ApiError extends Error {
   status: number; code: string; detail: string | null;
-  constructor(status: number, code: string, message: string, detail: string | null = null) {
-    super(message); this.status = status; this.code = code; this.detail = detail;
+  /** D3 · the backend's auth reason (NO_TOKEN, TOKEN_EXPIRED, UID_NOT_ALLOWED, …) when it sent one. */
+  reason: string | null;
+  constructor(status: number, code: string, message: string, detail: string | null = null, reason: string | null = null) {
+    super(message); this.status = status; this.code = code; this.detail = detail; this.reason = reason;
   }
 }
+
+/**
+ * A 403 UID_NOT_ALLOWED is not a request's problem — it is the session's.
+ * Broadcast once so the sign-in gate can show the sentence and a sign-out,
+ * instead of every panel printing the same 403.
+ */
+export const AUTH_REFUSED_EVENT = 'spread:auth-refused';
 
 const trimBase = (v: unknown): string => (typeof v === 'string' ? v.trim().replace(/\/$/, '') : '');
 
 export const API_BASE: string = trimBase(import.meta.env.VITE_API_BASE);
-export const API_TOKEN: string | null = (import.meta.env.VITE_SPREAD_API_TOKEN as string | undefined)?.trim() || null;
-
-/**
- * The scraper's ingest token is a SEPARATE secret (VITE_INGEST_TOKEN). The
- * backend token used to be sent to the scraper as well, which meant one value
- * — compiled into this public bundle — could also write orders, quotes and
- * depth and swap the slots on the scraper. With no VITE_INGEST_TOKEN the
- * scraper calls carry no token and answer 401, which BOOKS shows as an error:
- * loud, never a silent fallback to the backend token.
- */
-export const INGEST_TOKEN: string | null = (import.meta.env.VITE_INGEST_TOKEN as string | undefined)?.trim() || null;
-
-/**
- * The scraper owns /ingest (capture config + the depth slots); the backend owns
- * /api. In dev, Vite proxies both, so INGEST_BASE is blank. In a static build
- * there is no proxy — /ingest must be pointed at the scraper's origin, or the
- * request hits the SPA host (Firebase), gets index.html back with a 200, and the
- * "book" reads as a null response. Defaults to VITE_INGEST_BASE, then API_BASE
- * (when the backend reverse-proxies /ingest), then same-origin.
- */
-export const INGEST_BASE: string = trimBase(import.meta.env.VITE_INGEST_BASE) || API_BASE;
 
 /**
  * D2 · fail LOUD when a production build has no backend base. The silent
@@ -49,16 +40,20 @@ export const INGEST_BASE: string = trimBase(import.meta.env.VITE_INGEST_BASE) ||
  */
 export const configError: string | null =
   import.meta.env.PROD && !API_BASE
-    ? 'VITE_API_BASE is not set — this build has no backend URL and is calling its own origin. Rebuild with VITE_API_BASE (and VITE_INGEST_BASE) pointed at the backend/scraper.'
-    : import.meta.env.PROD && !INGEST_TOKEN
-      ? 'VITE_INGEST_TOKEN is not set — BOOKS cannot read the depth slots or swap them (the scraper answers 401). Rebuild with the scraper\'s INGEST_TOKEN.'
+    ? 'VITE_API_BASE is not set — this build has no backend URL and is calling its own origin. Rebuild with VITE_API_BASE pointed at the backend.'
+    : import.meta.env.PROD && !authConfigured
+      ? 'VITE_FIREBASE_API_KEY / VITE_FIREBASE_AUTH_DOMAIN / VITE_FIREBASE_PROJECT_ID are not set — this build cannot sign in, so every request will be refused. Rebuild with the Firebase web config.'
       : null;
 if (configError) console.error('[SPREAD config] ' + configError);
 
-function headers(json = false): Record<string, string> {
+// D3 · the credential is the signed-in user's ID token, fetched per request
+// (the SDK caches it and refreshes before expiry). `force` after a
+// TOKEN_EXPIRED. No token → no header: the server names the refusal.
+async function headers(json = false, force = false): Promise<Record<string, string>> {
   const h: Record<string, string> = {};
   if (json) h['Content-Type'] = 'application/json';
-  if (API_TOKEN) h.Authorization = `Bearer ${API_TOKEN}`;
+  const t = await idToken(force);
+  if (t) h.Authorization = `Bearer ${t}`;
   return h;
 }
 
@@ -67,10 +62,28 @@ async function parse<T>(r: Response): Promise<T> {
   let body: any = null;
   try { body = text ? JSON.parse(text) : null; } catch { body = null; }
   if (!r.ok) {
-    throw new ApiError(r.status, body?.code || `HTTP_${r.status}`,
-      body?.error || (text && text.length < 200 ? text : r.statusText) || `HTTP ${r.status}`, body?.detail ?? null);
+    const err = new ApiError(r.status, body?.code || `HTTP_${r.status}`,
+      body?.error || (text && text.length < 200 ? text : r.statusText) || `HTTP ${r.status}`, body?.detail ?? null,
+      typeof body?.reason === 'string' ? body.reason : null);
+    if (err.status === 403 && err.reason === 'UID_NOT_ALLOWED' && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(AUTH_REFUSED_EVENT, { detail: { message: err.message, reason: err.reason } }));
+    }
+    throw err;
   }
   return body as T;
+}
+
+/**
+ * One retry, and only for TOKEN_EXPIRED: the SDK refreshes the token before
+ * expiry, but a tab that slept past it wakes with a stale one. Any other
+ * refusal is reported as it is.
+ */
+async function withRetry<T>(run: (force: boolean) => Promise<T>): Promise<T> {
+  try { return await run(false); }
+  catch (e) {
+    if (e instanceof ApiError && e.status === 401 && e.reason === 'TOKEN_EXPIRED') return run(true);
+    throw e;
+  }
 }
 
 /**
@@ -96,7 +109,13 @@ async function doFetch(url: string, init: RequestInit, opts?: ReqOpts): Promise<
   // request's own controller, so cancellation works whichever side triggers it.
   const ext = opts?.signal;
   const onExtAbort = () => ctrl.abort();
-  if (ext) { if (ext.aborted) ctrl.abort(); else ext.addEventListener('abort', onExtAbort, { once: true }); }
+  if (ext?.aborted) {
+    // Already cancelled (the caller unmounted while the token was being read):
+    // nothing to fetch. The same AbortError a live cancel produces.
+    clearTimeout(to);
+    const e = new Error('aborted'); e.name = 'AbortError'; throw e;
+  }
+  if (ext) ext.addEventListener('abort', onExtAbort, { once: true });
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
   } catch (e: any) {
@@ -119,18 +138,26 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
     : '';
   const o = { ...opts, timeoutMs: opts?.timeoutMs ?? timeoutFor(path) };
-  const r = await doFetch(`${API_BASE}/api${path}${qs.length > 1 ? qs : ''}`, { headers: headers() }, o);
-  return parse<T>(r);
+  return withRetry(async (force) => {
+    const r = await doFetch(`${API_BASE}/api${path}${qs.length > 1 ? qs : ''}`, { headers: await headers(false, force) }, o);
+    return parse<T>(r);
+  });
 }
 
 export async function apiPost<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'DELETE' = 'POST', opts?: ReqOpts): Promise<T> {
   const o = { ...opts, timeoutMs: opts?.timeoutMs ?? timeoutFor(path) };
-  const r = await doFetch(`${API_BASE}/api${path}`, { method, headers: headers(true), body: JSON.stringify(body ?? {}) }, o);
-  return parse<T>(r);
+  return withRetry(async (force) => {
+    const r = await doFetch(`${API_BASE}/api${path}`, { method, headers: await headers(true, force), body: JSON.stringify(body ?? {}) }, o);
+    return parse<T>(r);
+  });
 }
 
 /**
- * The socket connects to the same origin as the API, with the same secret.
+ * The socket connects to the same origin as the API, with the same credential.
+ * D3 · `auth` is a FUNCTION: socket.io-client calls it on every (re)connect, so
+ * the handshake carries a fresh ID token. The server disconnects a user socket
+ * at the token's exp (after `spread:reauth`); getSocket() reconnects, this
+ * function runs again, and the watches are re-sent on connect.
  *
  * SPR-33 · reconnection is made EXPLICIT: a push channel that dropped (or never
  * attached) on load must keep trying, forever, with backoff — a silent gap that
@@ -141,7 +168,7 @@ export async function apiPost<T>(path: string, body: unknown, method: 'POST' | '
 export const socketOptions = () => ({
   path: '/socket.io',
   transports: ['websocket', 'polling'],
-  auth: API_TOKEN ? { token: API_TOKEN } : {},
+  auth: (cb: (data: Record<string, string>) => void) => { idToken().then((t) => cb(t ? { token: t } : {})).catch(() => cb({})); },
   reconnection: true,
   reconnectionAttempts: Infinity,
   reconnectionDelay: 1000,

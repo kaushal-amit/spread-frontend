@@ -5,7 +5,7 @@ Vite, TypeScript.
 
 ```bash
 npm install
-cp .env.example .env      # BACKEND_URL / SCRAPER_URL for the dev proxy; VITE_* for the browser
+cp .env.example .env      # BACKEND_URL / SCRAPER_URL for the dev proxy; VITE_API_BASE + VITE_FIREBASE_* for the browser
 npm run dev               # :3000, proxies /api and /socket.io to the backend, /ingest to the scraper
 npm run typecheck
 npm run build             # static dist/ — put it behind the same origin as the backend, or set VITE_API_BASE
@@ -32,15 +32,26 @@ arithmetic runs in the browser for the live surfaces.
 ## Environment
 
 The Vite proxy reads `BACKEND_URL` and `SCRAPER_URL` from `.env` via `loadEnv`. The browser sees
-only `VITE_API_BASE` (empty = same origin) and `VITE_SPREAD_API_TOKEN` (the backend's shared secret;
-this is a single-operator terminal — do not publish the bundle).
+`VITE_API_BASE` (empty = same origin) and the Firebase web config (`VITE_FIREBASE_API_KEY`,
+`VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`). **No token is compiled into the bundle**
+(D3): the terminal signs in with Google through Firebase Auth and sends the user's ID token on every
+request and on the socket handshake; the backend verifies it and allows the uid
+(`SPREAD_ALLOWED_UIDS`). Without the `VITE_FIREBASE_*` variables (a dev build against a loopback
+backend with no `SPREAD_API_TOKEN`) the sign-in gate is transparent.
+
+The depth slots (`GET/POST /api/slots`) go through the backend, which holds the scraper's token —
+the browser never talks to `/ingest` any more.
 
 **Production build.** `cp .env.production.example .env.production`, set `VITE_API_BASE` to the
-backend's public origin and `VITE_SPREAD_API_TOKEN` to the backend's `SPREAD_API_TOKEN`, then
-`npm run build`. `.env.production` is git-ignored because the token is in it — and the built
-`dist/` carries the token in its JavaScript, so the bundle is served only behind the operator's own
-login or VPN, never on an open hostname. The backend README ("Production") has the reverse-proxy
-rules: forward `Authorization` and `X-Forwarded-For`, proxy `/socket.io/` with the WebSocket upgrade.
+backend's public origin and the three `VITE_FIREBASE_*` values from the Firebase console, then
+`npm run build`. The build refuses if `VITE_SPREAD_API_TOKEN` or `VITE_INGEST_TOKEN` is set, and a
+production build refuses without the Firebase config. The backend README ("Production") has the
+reverse-proxy rules: forward `Authorization` and `X-Forwarded-For`, proxy `/socket.io/` with the
+WebSocket upgrade.
+
+**Firebase console, once:** Authentication › Sign-in method › enable Google; Authentication ›
+Settings › Authorised domains › add the hosting domain; sign in once, copy the uid from
+Authentication › Users into the backend's `SPREAD_ALLOWED_UIDS`.
 
 ## Verification (Step 4)
 

@@ -1,10 +1,9 @@
 /**
- * src/live/api.ts — the two origins, behind one proxy.
+ * src/live/api.ts — the live surfaces' reads and writes, all through /api.
  *
  * The scraper owns capture and the depth slots; the backend owns everything
- * computed. Vite proxies both under /api and /ingest, so the browser sees a
- * single origin — no CORS on either service, and one less thing to unpick when
- * this sits behind a reverse proxy in production.
+ * computed — and, since D3, fronts the slots for the browser too, so the SPA
+ * talks to ONE origin with ONE credential (the signed-in user's token).
  */
 
 export interface BookLevel { price: number; qty: number; orders: number | null; }
@@ -17,46 +16,20 @@ export interface Book {
 }
 export interface Slot { slot: number; symbol: string; code: string | null; }
 
-import { apiGet, INGEST_BASE, INGEST_TOKEN } from "../api/client";
+import { apiGet, apiPost } from "../api/client";
 import type { StockCandidate, TradingContract } from "../api/types";
 
 /**
- * 4.6 · a failure body may not be JSON — a proxy's HTML 502, an empty 204, a
- * plain-text 401 from the scraper. Every case becomes one readable Error
- * carrying the status, never "Unexpected token < in JSON".
+ * D3 · the depth slots go THROUGH THE BACKEND (GET/POST /api/slots), which
+ * presents the scraper's token from its own env — the scraper's INGEST_TOKEN
+ * used to be compiled into this bundle for these two calls. The backend relays
+ * the scraper's status and body verbatim, so a refusal is still the scraper's
+ * own sentence ("One symbol, one slot…") and ApiError carries it as `message`.
  */
-const json = async (r: Response) => {
-  const text = await r.text();
-  let body: any = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-  if (!r.ok) {
-    const plain = body ? (body.detail || body.error || body.message) : null;
-    const snippet = !body && text ? text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) : null;
-    // SPR-20 · when the server gives a readable sentence, show ONLY that — the
-    // "409 Conflict — " prefix is noise to the trader ("One symbol, one slot…"
-    // stands on its own). Fall back to the status line only when there is no
-    // server message to show.
-    if (plain) throw new Error(String(plain));
-    throw new Error(`${r.status} ${r.statusText || ""}`.trim() + (snippet ? ` — ${snippet}` : ""));
-  }
-  // A 200 with a body that is NOT JSON is a misroute, not an empty book: the SPA
-  // host answered /ingest with its index.html. Returning null here let a consumer
-  // read `.symbols` off null ("Cannot read properties of null"). Surface it as a
-  // diagnostic instead of a silent null. (A genuine empty 204 stays null.)
-  if (body === null && text && text.trim()) {
-    throw new Error("the scraper returned a non-JSON response — /ingest is not routed to the scraper (set VITE_INGEST_BASE)");
-  }
-  return body;
-};
-const scraperHeaders = (): Record<string, string> => (INGEST_TOKEN ? { Authorization: `Bearer ${INGEST_TOKEN}` } : {});
+export interface SlotList { symbols: Slot[]; trading_date: string; slotCount?: number }
 
-/**
- * The symbols currently swept, and how many slots there ARE. Served by the
- * SCRAPER — capture config. `slotCount` is the scraper's SLOT_COUNT (5 today,
- * G-5); the page draws that many chips, never a literal.
- */
-export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string; slotCount?: number }> =>
-  fetch(`${INGEST_BASE}/ingest/depth-symbols`, { headers: scraperHeaders() }).then(json);
+/** The symbols currently swept, and how many slots there ARE (`slotCount` = the scraper's SLOT_COUNT). */
+export const getSlots = (): Promise<SlotList> => apiGet<SlotList>("/slots");
 
 /**
  * Swap a slot. Takes effect within 25 seconds — the sweep re-reads the list
@@ -66,11 +39,7 @@ export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string; slo
  * names which, and that text is shown to the trader rather than a generic one.
  */
 export const swapSlot = (slot: number, symbol: string, reason?: string) =>
-  fetch(`${INGEST_BASE}/ingest/slots/${slot}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...scraperHeaders() },
-    body: JSON.stringify({ symbol, reason }),
-  }).then(json);
+  apiPost<{ ok: boolean; row?: unknown; error?: string }>(`/slots/${slot}`, { symbol, reason });
 
 /** Today's board, ranked. The BACKEND's screening pipeline — typed (C-07). */
 export const getBoard = (): Promise<StockCandidate[]> => apiGet<StockCandidate[]>("/stocks");

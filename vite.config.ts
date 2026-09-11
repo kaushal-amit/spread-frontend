@@ -24,24 +24,32 @@ function requireApiBase(env: Record<string, string | undefined>, command: string
         throw new Error(
           '[SPREAD build] VITE_API_BASE is not set. A production build with no backend URL ' +
           'calls its own origin — the bug that shipped the wss://kse-spread socket and the ' +
-          'whole-board 404s. Set VITE_API_BASE (and VITE_INGEST_BASE) to the backend/scraper ' +
-          'origin before building, or build with --mode development for a local bundle.');
+          'whole-board 404s. Set VITE_API_BASE to the backend origin before building, or build ' +
+          'with --mode development for a local bundle.');
       }
-      // A blank VITE_INGEST_BASE ("VITE_INGEST_BASE=" in .env.production) used
-      // to build a bundle whose INGEST_BASE was "" — same-origin, the BOOKS
-      // null crash. Unset falls back to VITE_API_BASE; blank is a mistake.
-      if (command === 'build' && mode === 'production'
-          && env.VITE_INGEST_BASE !== undefined && blank(env.VITE_INGEST_BASE)) {
-        throw new Error(
-          '[SPREAD build] VITE_INGEST_BASE is set but blank. Either point it at the scraper ' +
-          'origin, or remove the line to fall back to VITE_API_BASE (when the backend ' +
-          'reverse-proxies /ingest).');
+      /*
+       * D3 · NO SECRET IN THE BUNDLE. The two tokens that used to be compiled
+       * in are refused outright, in every mode: a build that has them set is a
+       * build that would ship them. Production also needs the Firebase web
+       * config (public by design) or the terminal can never sign in.
+       */
+      if (command === 'build') {
+        for (const k of ['VITE_SPREAD_API_TOKEN', 'VITE_INGEST_TOKEN']) {
+          if (!blank(env[k])) {
+            throw new Error(
+              `[SPREAD build] ${k} is set. Since D3 the terminal signs in with Firebase and sends ` +
+              'the user\'s ID token; no static token may be compiled into the public bundle. ' +
+              'Remove the variable (and rotate the token — every bundle that carried it is public).');
+          }
+        }
       }
-      if (command === 'build' && mode === 'production' && blank(env.VITE_INGEST_TOKEN)) {
-        console.warn(
-          '[SPREAD build] VITE_INGEST_TOKEN is not set — the bundle sends NO token to the ' +
-          'scraper, so BOOKS slot reads and swaps will answer 401. Set it to the scraper\'s ' +
-          'INGEST_TOKEN (a separate secret from VITE_SPREAD_API_TOKEN).');
+      if (command === 'build' && mode === 'production') {
+        const missing = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID'].filter((k) => blank(env[k]));
+        if (missing.length) {
+          throw new Error(
+            `[SPREAD build] ${missing.join(', ')} not set. A production bundle signs in with Firebase ` +
+            '(D3) and cannot without its web config — Firebase console › Project settings › Your apps.');
+        }
       }
     },
   };

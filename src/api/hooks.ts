@@ -20,7 +20,14 @@ import { requestNotifyOnce, pushNotification, beep } from "../lib/notify";
 // ─── the shared socket ─────────────────────────────────────────────────────
 let shared: Socket | null = null;
 export function getSocket(): Socket {
-  if (!shared) shared = io(socketUrl, socketOptions());
+  if (!shared) {
+    shared = io(socketUrl, socketOptions());
+    // D3 · a server-side disconnect (the token's exp, after spread:reauth) is
+    // "io server disconnect", which socket.io-client does NOT retry on its own.
+    // Reconnect explicitly: the auth function presents a fresh token.
+    const s = shared;
+    s.on("disconnect", (reason: string) => { if (reason === "io server disconnect") setTimeout(() => s.connect(), 250); });
+  }
   return shared;
 }
 

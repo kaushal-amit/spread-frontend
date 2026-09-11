@@ -14,12 +14,17 @@ jobs:
       - run: npm run typecheck
       # D2: a production build refuses to complete without a backend URL. CI
       # builds against a sentinel origin — the bundle it produces is a gate,
-      # not a deploy artefact.
+      # not a deploy artefact. D3: the Firebase web config is public by design;
+      # the sentinel values here are not credentials.
       - run: npm run build
         env:
           VITE_API_BASE: https://ci.invalid
-          VITE_INGEST_BASE: https://ci.invalid
-          VITE_INGEST_TOKEN: ci-only-placeholder-token-not-real
-          VITE_SPREAD_API_TOKEN: ci-only-placeholder-token-not-real
+          VITE_FIREBASE_API_KEY: ci-placeholder
+          VITE_FIREBASE_AUTH_DOMAIN: ci.invalid
+          VITE_FIREBASE_PROJECT_ID: ci-placeholder
       # Ground rule 4: no fee math, gate logic or state maps in the browser.
       - run: '! grep -rn "3\.4\|INITIAL_" src'
+      # D3: no static token may be compiled into the bundle — the source must
+      # not even name the variables (vite.config refuses a build that sets them).
+      - run: '! grep -rn "VITE_SPREAD_API_TOKEN\|VITE_INGEST_TOKEN" src'
+
