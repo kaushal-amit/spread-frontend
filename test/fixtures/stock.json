@@ -162,6 +162,8 @@
     "dataQuality": "OK",
     "dataQualityPct": 100,
     "notComputed": [],
-    "gateStatsSource": "BACKEND_BRIDGE"
+    "gateStatsSource": "BACKEND_BRIDGE",
+    "everTraded": null,
+    "bookCapturedToday": null
   }
 }

@@ -58,6 +58,10 @@ export interface StockCandidate {
   };
   dataQuality: 'OK' | 'PARTIAL' | 'THIN' | 'MISSING' | 'NO_BOOK';
   dataQualityPct?: number;
+  /** Measured server-side (screening.js): any spread.order_leg row for the symbol, EVER. null = not measured. */
+  everTraded: boolean | null;
+  /** Measured server-side: at least one depth capture for the symbol on the board day. null = not measured. */
+  bookCapturedToday: boolean | null;
   /** Gates that failed for want of a NUMBER, not for want of a stock. */
   notComputed: string[];
   gateStatsSource: 'SCRAPER' | 'BACKEND_BRIDGE' | null;

@@ -15,6 +15,8 @@ import { getSocket } from "../api/hooks";
  */
 export function useLiveBooks() {
   const [slots, setSlots] = useState<Slot[]>([]);
+  // The scraper's slot count — null until the list arrives, never a guess.
+  const [slotCount, setSlotCount] = useState<number | null>(null);
   const [books, setBooks] = useState<Record<string, Book>>({});
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,7 @@ export function useLiveBooks() {
       const r = await getSlots();
       const list = r?.symbols || [];
       setSlots(list);
+      setSlotCount(typeof r?.slotCount === "number" && r.slotCount > 0 ? r.slotCount : null);
       watch(list.map((x) => x.symbol));
       setError(null);
     } catch (e: any) {
@@ -103,5 +106,5 @@ export function useLiveBooks() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { slots, books, connected, error, reloadSlots };
+  return { slots, slotCount, books, connected, error, reloadSlots };
 }

@@ -20,6 +20,7 @@ export const POLL_MS = {
   detail: 10_000,
   sessions: 600_000,
   review: 600_000,
+  candles: 30_000,
 } as const;
 
 /**

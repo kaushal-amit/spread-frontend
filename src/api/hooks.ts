@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { apiGet, ApiError, socketOptions, socketUrl } from "./client";
 import { POLL_MS, BACKOFF, DEBOUNCE_MS } from "../config/endpoints";
-import type { AccountState, BoardUpdate, Budget, MarketDay, SessionInfo, StockCandidate, TradingContract, Detail, AlertMsg, EntryAlertMsg, StrandedMsg, WakeupMsg, HaltMsg, SlotStaleMsg, FeedServerEvent, FeedHealth } from "./types";
+import type { AccountState, BoardUpdate, Budget, MarketDay, SessionInfo, StockCandidate, TradingContract, Detail, AlertMsg, EntryAlertMsg, StrandedMsg, WakeupMsg, HaltMsg, SlotStaleMsg, FeedServerEvent, FeedHealth, Candles } from "./types";
 import { kuwaitHHMM } from "../lib/time";
 import { requestNotifyOnce, pushNotification, beep } from "../lib/notify";
 
@@ -249,6 +249,10 @@ export const useReviewBoard = (date: string | null, enabled: boolean) =>
 export const isSelectableSession = (date: string, today: string | null, sessionDates: string[]): boolean =>
   date === today || new Set(sessionDates).has(date);
 export const useMarket = () => usePolled<MarketDay>("/market", POLL_MS.market);
+/** C5 · the chart view: /candles/:symbol at the chosen grain, for the FOCUSED symbol only. */
+export const useCandles = (symbol: string | null, minutes: number, date: string | null = null) =>
+  usePolled<Candles>(`/candles/${symbol ?? ""}`, POLL_MS.candles, null,
+    { minutes, date: date ?? undefined }, !!symbol);
 export const useContracts = (signal?: unknown) => usePolled<TradingContract[]>("/trading/contracts", POLL_MS.contracts, signal);
 
 // ─── SPR-30 · the capture-feed roster, so the header can be honest ──────────

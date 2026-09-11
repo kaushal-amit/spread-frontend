@@ -50,8 +50,12 @@ const json = async (r: Response) => {
 };
 const scraperHeaders = (): Record<string, string> => (INGEST_TOKEN ? { Authorization: `Bearer ${INGEST_TOKEN}` } : {});
 
-/** The five symbols currently swept. Served by the SCRAPER — capture config. */
-export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string }> =>
+/**
+ * The symbols currently swept, and how many slots there ARE. Served by the
+ * SCRAPER — capture config. `slotCount` is the scraper's SLOT_COUNT (5 today,
+ * G-5); the page draws that many chips, never a literal.
+ */
+export const getSlots = (): Promise<{ symbols: Slot[]; trading_date: string; slotCount?: number }> =>
   fetch(`${INGEST_BASE}/ingest/depth-symbols`, { headers: scraperHeaders() }).then(json);
 
 /**

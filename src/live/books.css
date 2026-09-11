@@ -60,3 +60,4 @@
 .mover-sym { min-width:76px; font-weight:600; }
 .mover-why { color:var(--dimmer,#64748b); font-size:10.5px; }
 .mover-nobook { margin-left:auto; color:#f59e0b; font-size:10px; }
+.book-free { opacity:.6; border-style:dashed; }

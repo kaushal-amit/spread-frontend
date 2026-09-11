@@ -24,6 +24,7 @@ import { SymbolSearch } from "./components/SymbolSearch";
 import { StockDetail } from "./components/StockDetail";
 import { TodayView } from "./components/TodayView";
 import { StatesView } from "./components/StatesView";
+import { CandleChart } from "./components/CandleChart";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BooksView } from "./live/BooksView";
 import "./live/books.css";
@@ -318,6 +319,12 @@ export default function App() {
                   <button type="button" className="view-btn" onClick={() => setViewMode("chat")} title="Chat" aria-label="Chat" id="btn-analytics-to-chat"><MessageSquare size={13} /></button>
                 </div>
               </div>
+            )}
+            {/* C5 · the chart view: in the full-width mode the focused symbol's
+                candles (GET /api/candles) sit above its detail. Nothing is drawn
+                without a focused symbol — the chart is a view OF a symbol. */}
+            {viewMode === "analytics" && curSymbol && (
+              <ErrorBoundary name="CHART"><CandleChart symbol={curSymbol} date={reviewMode ? selectedDate : null} /></ErrorBoundary>
             )}
             <div id="panel">
               {tab === "BOOKS" ? <ErrorBoundary name="BOOKS"><BooksView /></ErrorBoundary>

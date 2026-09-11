@@ -26,7 +26,7 @@ function cand(over: Partial<StockCandidate> = {}): StockCandidate {
       volSpikeRatio: 1.1, outwardBlockFlowRatio: 0.9, consistencyDays: 5, gapPresentPct: 40,
       dailyRangeFils: 8, targetTicks: 1, walkedUp: false,
     },
-    dataQuality: "OK", notComputed: [], gateStatsSource: "SCRAPER",
+    dataQuality: "OK", notComputed: [], gateStatsSource: "SCRAPER", everTraded: true, bookCapturedToday: true,
   } as StockCandidate;
   return { ...base, ...over, metrics: { ...base.metrics, ...(over.metrics || {}) } };
 }
@@ -66,15 +66,16 @@ describe("screener · the seven filters (C1)", () => {
     expect(applyScreener([dirty], "CLEAN_TAPE")).toHaveLength(0);
   });
 
-  it("BOOK CAPTURED excludes NO_BOOK and MISSING", () => {
-    expect(applyScreener([cand({ dataQuality: "OK" })], "BOOK")).toHaveLength(1);
-    expect(applyScreener([cand({ dataQuality: "NO_BOOK" })], "BOOK")).toHaveLength(0);
-    expect(applyScreener([cand({ dataQuality: "MISSING" })], "BOOK")).toHaveLength(0);
+  it("BOOK CAPTURED is the server's bookCapturedToday, not dataQuality", () => {
+    expect(applyScreener([cand({ bookCapturedToday: true, dataQuality: "NO_BOOK" })], "BOOK")).toHaveLength(1);
+    expect(applyScreener([cand({ bookCapturedToday: false, dataQuality: "OK" })], "BOOK")).toHaveLength(0);
+    expect(applyScreener([cand({ bookCapturedToday: null })], "BOOK")).toHaveLength(0);
   });
 
-  it("NEVER TRADED keeps only consistencyDays === 0", () => {
-    expect(applyScreener([cand({ metrics: { consistencyDays: 0 } as StockCandidate["metrics"] })], "NEVER_TRADED")).toHaveLength(1);
-    expect(applyScreener([cand({ metrics: { consistencyDays: 3 } as StockCandidate["metrics"] })], "NEVER_TRADED")).toHaveLength(0);
+  it("NEVER TRADED is the server's everTraded === false (no order_leg row ever), not consistencyDays", () => {
+    expect(applyScreener([cand({ everTraded: false, metrics: { consistencyDays: 3 } as StockCandidate["metrics"] })], "NEVER_TRADED")).toHaveLength(1);
+    expect(applyScreener([cand({ everTraded: true, metrics: { consistencyDays: 0 } as StockCandidate["metrics"] })], "NEVER_TRADED")).toHaveLength(0);
+    expect(applyScreener([cand({ everTraded: null })], "NEVER_TRADED")).toHaveLength(0);
   });
 
   it("there are exactly seven filters, ALL first", () => {
@@ -116,10 +117,10 @@ describe("screener · the columns (C2)", () => {
     expect(Object.fromEntries(screenerColumns({ ...c, changeFils: 0.8999999 } as StockCandidate).map((x) => [x.k, x.v]))["1d"]).toBe("+1");
   });
 
-  it("NEVER TRADED matches a measured 0, not an uncomputed null", () => {
+  it("NEVER TRADED matches a measured false, not an unmeasured null", () => {
     const c = cand();
     const nt = screenerDef("NEVER_TRADED").predicate;
-    expect(nt({ ...c, metrics: { ...c.metrics, consistencyDays: 0 } } as StockCandidate)).toBe(true);
-    expect(nt({ ...c, metrics: { ...c.metrics, consistencyDays: null } } as unknown as StockCandidate)).toBe(false);
+    expect(nt({ ...c, everTraded: false })).toBe(true);
+    expect(nt({ ...c, everTraded: null })).toBe(false);
   });
 });

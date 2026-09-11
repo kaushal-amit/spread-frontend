@@ -37,6 +37,8 @@ export const SHAPES = {
     gateGroups: "array", headroom: "object", market: "string", isDead: "boolean", isOutOfReach: "boolean",
     isStructuralFailure: "boolean", behaviourFlags: "array", metrics: "object", dataQuality: "string",
     notComputed: "array", gateStatsSource: "string?",
+    // The screener facts (present.js): booleans the server measured, null when it did not.
+    everTraded: "boolean?", bookCapturedToday: "boolean?",
   },
   TradingContract: {
     symbol: "string", seq: "number", state: "string", shares: "number", entry: "number?", bid: "number?", offer: "number?",

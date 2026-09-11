@@ -40,7 +40,7 @@ const Clock: React.FC<{ openedAt: string; symbol: string }> = ({ openedAt, symbo
 };
 
 export const BooksView: React.FC = () => {
-  const { slots, books, connected, error, reloadSlots } = useLiveBooks();
+  const { slots, slotCount, books, connected, error, reloadSlots } = useLiveBooks();
   // R-11 · the scraper's capture interval, from the server; tiles read stale from it.
   const captureIntervalSecs = useSession().data?.captureIntervalSecs;
   // One 5-second clock for the stale markers; a tile re-renders only when its
@@ -65,6 +65,12 @@ export const BooksView: React.FC = () => {
   }, []);
 
   const slotted = new Set(slots.map((s) => s.symbol));
+  // B5 · one chip per slot the scraper HAS (slotCount), the held ones as tiles
+  // and the rest as `free` — the count comes from /ingest/depth-symbols, never
+  // a literal (the reference drew 8; the sweep today has 5).
+  const held = new Set(slots.map((s) => s.slot));
+  const free: number[] = [];
+  for (let i = 1; slotCount != null && i <= slotCount; i++) if (!held.has(i)) free.push(i);
 
   return (
     <div className="books-view">
@@ -72,8 +78,8 @@ export const BooksView: React.FC = () => {
         <span className={connected ? "live-on" : "live-off"}>
           {connected ? "live" : "reconnecting…"}
         </span>
-        <span className="book-dim">
-          {slots.length} slot{slots.length === 1 ? "" : "s"} · the sweep re-reads
+        <span className="book-dim" id="slot-count">
+          {slotCount == null ? `${slots.length} slot${slots.length === 1 ? "" : "s"}` : `${slots.length} of ${slotCount} slots held`} · the sweep re-reads
           the list each cycle, so a swap lands within 25s
         </span>
         {error && <span className="book-err">slots: {error}</span>}
@@ -94,6 +100,12 @@ export const BooksView: React.FC = () => {
         {slots.length === 0 && !error && <div className="book-dim">{connected ? "no depth slots configured — the scraper's /ingest/depth-symbols returned none" : "waiting for the slot list…"}</div>}
         {slots.map((s) => (
           <BookTile key={s.slot} slot={s} book={books[s.symbol]} onSwapped={reloadSlots} connected={connected} now={now} captureIntervalSecs={captureIntervalSecs} />
+        ))}
+        {free.map((n) => (
+          <div key={`free-${n}`} className="book-tile book-free" data-slot={n}>
+            <div className="book-head"><span className="book-sym">slot {n}</span><span className="book-dim">free</span></div>
+            <div className="book-dim">no symbol in this slot — swap one in from a tile, or POST /ingest/slots/{n}</div>
+          </div>
         ))}
       </div>
 

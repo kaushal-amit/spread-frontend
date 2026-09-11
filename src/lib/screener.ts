@@ -28,8 +28,8 @@ const tapeCell = (s: StockCandidate) =>
  *   REACHABLE AT n KD   not out of reach at the live slot (server flag)
  *   RISING 1d+5d        up today and NOT flagged down on 1d/5d (trendWarn)
  *   CLEAN TAPE          Gate 5 passed and not walked-up (server markers)
- *   BOOK CAPTURED       a depth book exists (dataQuality not NO_BOOK/MISSING)
- *   NEVER TRADED        active on 0 of the last sessions (consistencyDays)
+ *   BOOK CAPTURED       ≥ 1 depth capture for the symbol TODAY (server-measured)
+ *   NEVER TRADED        no order_leg row for the symbol, EVER (server-measured)
  */
 export const SCREENER_FILTERS: ScreenerFilterDef[] = [
   { key: "ALL", label: "ALL", predicate: () => true },
@@ -44,14 +44,14 @@ export const SCREENER_FILTERS: ScreenerFilterDef[] = [
     key: "CLEAN_TAPE", label: "CLEAN TAPE",
     predicate: (s) => { const t = tapeCell(s); return !!t && t.ok && !s.metrics.walkedUp; },
   },
-  {
-    key: "BOOK", label: "BOOK CAPTURED",
-    predicate: (s) => s.dataQuality !== "NO_BOOK" && s.dataQuality !== "MISSING",
-  },
-  // A MEASURED 0 of the last 5 sessions. null (not computed) does not match —
-  // it used to, when the presenter turned null into 0 and every NOT COMPUTED
-  // symbol read as never traded.
-  { key: "NEVER_TRADED", label: "NEVER TRADED", predicate: (s) => s.metrics.consistencyDays === 0 },
+  // Both are FACTS the server measured (present.js everTraded /
+  // bookCapturedToday), not readings of dataQuality or consistencyDays:
+  //   BOOK CAPTURED   a depth capture exists for the symbol on the board day
+  //   NEVER TRADED    our ledger holds no order_leg row for the symbol on any day
+  // null (a board built without the facts) matches NEITHER chip — a symbol is
+  // never "never traded" or "captured" for want of a measurement.
+  { key: "BOOK", label: "BOOK CAPTURED", predicate: (s) => s.bookCapturedToday === true },
+  { key: "NEVER_TRADED", label: "NEVER TRADED", predicate: (s) => s.everTraded === false },
 ];
 
 export function screenerDef(key: ScreenerKey): ScreenerFilterDef {
